@@ -1,0 +1,22 @@
+[package]
+name = "precord_core"
+version = "0.1.0"
+edition = "2021"
+description = "Precord audio engine: lock-free replay ring buffer, DSP, WAV I/O, JNI bridge"
+
+[lib]
+name = "precord_core"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+jni = "0.21"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+
+[profile.dev]
+opt-level = 1

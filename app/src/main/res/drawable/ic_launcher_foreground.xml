@@ -1,0 +1,8 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
+    <!-- ring: 24 ticks drawn as one stroked arc set -->
+    <path android:strokeColor="#F2F2F2" android:strokeWidth="5" android:fillColor="#00000000"
+        android:pathData="M54,30 A24,24 0 1,1 53.9,30" />
+    <path android:fillColor="#FF3B00"
+        android:pathData="M54,42 A12,12 0 1,1 53.99,42 z" />
+</vector>
