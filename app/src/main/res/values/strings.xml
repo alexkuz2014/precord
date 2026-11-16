@@ -135,9 +135,9 @@
     <string name="mic_raw">Raw</string>
     <string name="mic_raw_sub">No auto-gain or noise suppression by the phone (if the device supports it).</string>
     <string name="mic_denoise">Noise reduction</string>
-    <string name="mic_denoise_sub">Phone noise suppressor plus a 90 Hz rumble filter.</string>
+    <string name="mic_denoise_sub">Spectral noise reduction for steady hiss, fans and hum, plus the phone\'s own suppressor and a 90 Hz rumble filter.</string>
     <string name="mic_playback">Remove phone audio</string>
-    <string name="mic_playback_sub">Precord receives exactly what this phone is playing (video, music, games) and subtracts it from the microphone, keeping your voice. Android asks for a capture permission each time you arm.</string>
+    <string name="mic_playback_sub">Precord receives exactly what this phone is playing (video, music, games) and subtracts it from the microphone, keeping your voice. Works best when sound plays through the speaker; in headphones there is nothing to remove. Android asks for a capture permission each time you arm.</string>
     <string name="mode_restart">Changing the mode restarts the buffer.</string>
     <string name="capture_needed">Phone audio is not being removed: capture permission needed</string>
     <string name="capture_allow">Allow</string>

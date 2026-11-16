@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.5.0
+* **Phone-audio removal, rebuilt for reliability:** playback is captured on its own thread into a jitter FIFO, so a stalled or revoked capture can never freeze the microphone or silently disable removal; the Rust canceller now adapts over a 64 ms window (up to 1536 taps), keeps what it learned when the stream delay drifts, and is covered by delay-lock, echo-reduction, double-talk and engine-integration tests.
+* **Real noise reduction:** new spectral noise reducer (STFT, adaptive noise floor, over-subtraction with smoothing) in the *Noise reduction* mode, in addition to the phone suppressor and rumble filter.
+* **Bug fixes:** failure reasons (mic busy / no memory / no permission) were wiped the moment the service stopped; save/failed note stuck in the notification forever; leftover `trim_tmp` files could appear in the library; the Quick Settings tile could start playback-removal mode without its consent dialog (it now opens the app).
+* Retry budget for microphone re-opens refills after a stable minute.
+* Rust: 27 unit tests including a real-time budget test (full chain runs ~18x faster than real time on x86).
+
 ## 1.3.0
 * **Remove phone audio (new engine):** the app now receives the exact audio the phone is playing (Android AudioPlaybackCapture) and subtracts it from the microphone with an adaptive filter written in Rust (delay tracking + NLMS with double-talk protection). Replaces the old call-mode approach that also ducked the user's voice.
 * **No more conflicting settings:** one *Microphone mode* choice (Standard / Noise reduction / Remove phone audio / Raw) instead of independent switches; old settings are migrated.
