@@ -35,7 +35,7 @@ object ClipEditor {
         return ok
     }
 
-    private fun audioTrack(ex: MediaExtractor): Int =
+    internal fun audioTrack(ex: MediaExtractor): Int =
         (0 until ex.trackCount).firstOrNull { ex.getTrackFormat(it).getString(MediaFormat.KEY_MIME)?.startsWith("audio/") == true }
             ?: error("no audio track")
 
@@ -76,6 +76,61 @@ object ClipEditor {
             if (started) runCatching { muxer?.stop() }
             muxer?.release()
         }
+    }
+
+    /** MediaCodec decode of M4A / Ogg-Opus to mono PCM16 LE. Returns the sample rate. */
+    internal fun decodeCompressedToPcm(file: File, out: File): Int {
+        val ex = MediaExtractor()
+        ex.setDataSource(file.path)
+        val t = audioTrack(ex)
+        ex.selectTrack(t)
+        val fmt = ex.getTrackFormat(t)
+        var rate = fmt.getInteger(MediaFormat.KEY_SAMPLE_RATE)
+        var ch = if (fmt.containsKey(MediaFormat.KEY_CHANNEL_COUNT)) fmt.getInteger(MediaFormat.KEY_CHANNEL_COUNT) else 1
+        val codec = MediaCodec.createDecoderByType(fmt.getString(MediaFormat.KEY_MIME)!!)
+        try {
+            codec.configure(fmt, null, null, 0)
+            codec.start()
+            val info = MediaCodec.BufferInfo()
+            var inDone = false
+            var outDone = false
+            out.outputStream().buffered().use { os ->
+                while (!outDone) {
+                    if (!inDone) {
+                        val i = codec.dequeueInputBuffer(10_000)
+                        if (i >= 0) {
+                            val n = ex.readSampleData(codec.getInputBuffer(i)!!, 0)
+                            if (n < 0) { codec.queueInputBuffer(i, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM); inDone = true }
+                            else { codec.queueInputBuffer(i, 0, n, ex.sampleTime, 0); ex.advance() }
+                        }
+                    }
+                    val o = codec.dequeueOutputBuffer(info, 10_000)
+                    if (o == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
+                        rate = codec.outputFormat.getInteger(MediaFormat.KEY_SAMPLE_RATE)
+                        ch = codec.outputFormat.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
+                    } else if (o >= 0) {
+                        val bb = codec.getOutputBuffer(o)!!.order(ByteOrder.nativeOrder())
+                        bb.position(info.offset); bb.limit(info.offset + info.size)
+                        val sb = bb.asShortBuffer()
+                        val frame = ByteArray(2)
+                        var i = 0
+                        while (i < sb.remaining()) {
+                            val v = sb.get(i).toInt()
+                            frame[0] = (v and 0xFF).toByte(); frame[1] = ((v shr 8) and 0xFF).toByte()
+                            os.write(frame)
+                            i += ch // keep the first channel only
+                        }
+                        codec.releaseOutputBuffer(o, false)
+                        if (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) outDone = true
+                    }
+                }
+            }
+        } finally {
+            runCatching { codec.stop() }
+            codec.release()
+            ex.release()
+        }
+        return rate
     }
 
     private fun decodePeaks(file: File, buckets: Int): FloatArray {

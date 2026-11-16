@@ -36,9 +36,9 @@ class QuickTileService : TileService() {
     private fun render(running: Boolean, bufferedMs: Long) {
         val t = qsTile ?: return
         t.state = if (running) Tile.STATE_ACTIVE else Tile.STATE_INACTIVE
-        t.label = "Precord"
+        t.label = getString(R.string.tile_label)
         t.icon = Icon.createWithResource(this, R.drawable.ic_tile)
-        if (Build.VERSION.SDK_INT >= 29) t.subtitle = if (running) "Armed ${Fmt.clock(bufferedMs)}" else "Off"
+        if (Build.VERSION.SDK_INT >= 29) t.subtitle = if (running) getString(R.string.tile_armed, Fmt.clock(bufferedMs)) else getString(R.string.tile_off)
         t.updateTile()
     }
 

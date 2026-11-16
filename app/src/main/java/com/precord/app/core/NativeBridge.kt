@@ -9,7 +9,7 @@ object NativeBridge {
     external fun nativeCreate(sampleRate: Int, windowMs: Long): Long
     external fun nativeDestroy(handle: Long)
     external fun nativeWrite(handle: Long, pcm: ShortArray, len: Int)
-    external fun nativeSetDsp(handle: Long, gainDb: Float, gateEnabled: Boolean, gateDb: Float)
+    external fun nativeSetDsp(handle: Long, gainDb: Float, gateEnabled: Boolean, gateDb: Float, highpass: Boolean, voice: Boolean)
     external fun nativeLevels(handle: Long, out: FloatArray)
     external fun nativeScope(handle: Long, out: FloatArray)
     external fun nativeBufferInfo(handle: Long, out: LongArray)

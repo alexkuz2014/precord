@@ -71,6 +71,14 @@ class ClipRepository(context: Context) {
     }
 
     @Synchronized
+    fun setTranscript(file: File, text: String) {
+        val meta = index.optJSONObject(file.name) ?: JSONObject().also { index.put(file.name, it) }
+        meta.put("transcript", text)
+        saveIndex()
+        refresh()
+    }
+
+    @Synchronized
     fun delete(file: File) {
         file.delete()
         index.remove(file.name)
@@ -115,6 +123,7 @@ class ClipRepository(context: Context) {
             sizeBytes = f.length(),
             createdAt = f.lastModified(),
             sampleRate = meta.optInt("sampleRate", 0),
+            transcript = meta.optString("transcript"),
         )
     }
 

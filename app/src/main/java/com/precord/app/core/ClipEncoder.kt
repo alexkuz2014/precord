@@ -7,7 +7,7 @@ import android.media.MediaMuxer
 import java.io.File
 import java.nio.ByteOrder
 
-data class EncodeOutcome(val file: File, val durationMs: Long, val note: String? = null)
+data class EncodeOutcome(val file: File, val durationMs: Long, val fellBackFrom: ClipFormat? = null)
 
 /**
  * Turns a slice of the Rust ring buffer into a file.
@@ -29,7 +29,7 @@ object ClipEncoder {
             target.delete()
             val fallback = File(target.parentFile, target.nameWithoutExtension + ".wav")
             val out = wav(engine, settings, fallback, lastMs)
-            out.copy(note = "${format.label} encoder unavailable - saved as WAV")
+            out.copy(fellBackFrom = format)
         }
     }
 

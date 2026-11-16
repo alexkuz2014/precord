@@ -39,8 +39,9 @@ class ReplayEngine private constructor(
 
     fun write(pcm: ShortArray, len: Int) = withHandle(Unit) { NativeBridge.nativeWrite(it, pcm, len) }
 
-    fun setDsp(gainDb: Float, gateEnabled: Boolean, gateDb: Float) =
-        withHandle(Unit) { NativeBridge.nativeSetDsp(it, gainDb, gateEnabled, gateDb) }
+    fun setDsp(s: PrecordSettings) = withHandle(Unit) {
+        NativeBridge.nativeSetDsp(it, s.gainDb.toFloat(), s.gateEnabled, s.gateDb.toFloat(), s.denoise, s.voiceBoost)
+    }
 
     /** (rms, peak) linear 0..1 of the latest 20 ms. Not thread-safe across callers (UI ticker only). */
     fun levels(): Pair<Float, Float> = withHandle(0f to 0f) {

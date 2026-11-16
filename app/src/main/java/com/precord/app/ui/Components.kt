@@ -8,6 +8,10 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.drag
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -74,11 +78,12 @@ fun Pill(text: String, selected: Boolean, modifier: Modifier = Modifier, enabled
     val tick = rememberTick()
     Box(
         modifier
-            .height(36.dp)
+            .height(44.dp)
             .clip(RoundedCornerShape(50))
             .background(if (selected) PC.Ink else PC.Black)
             .border(1.dp, if (selected) PC.Ink else PC.Line, RoundedCornerShape(50))
-            .clickable(enabled = enabled) { tick(); onClick() }
+            .semantics { this.selected = selected }
+            .clickable(enabled = enabled, role = Role.RadioButton) { tick(); onClick() }
             .padding(horizontal = 16.dp),
         contentAlignment = Alignment.Center,
     ) {
@@ -97,10 +102,10 @@ fun KeyButton(text: String, modifier: Modifier = Modifier, enabled: Boolean = tr
     }
     Box(
         modifier
-            .height(44.dp)
+            .height(48.dp)
             .background(if (filled && enabled) PC.Ink else PC.Black)
             .border(1.dp, if (enabled) (if (filled) PC.Ink else PC.Dim) else PC.Line)
-            .clickable(enabled = enabled) { click(); onClick() }
+            .clickable(enabled = enabled, role = Role.Button) { click(); onClick() }
             .padding(horizontal = 16.dp),
         contentAlignment = Alignment.Center,
     ) {
@@ -118,9 +123,10 @@ fun Segmented(options: List<String>, selected: Int, modifier: Modifier = Modifie
             Box(
                 Modifier
                     .weight(1f)
-                    .height(40.dp)
+                    .height(48.dp)
                     .background(if (on) PC.Ink else PC.Black)
-                    .clickable(enabled = ok) { tick(); onSelect(i) },
+                    .semantics { this.selected = on }
+                    .clickable(enabled = ok, role = Role.RadioButton) { tick(); onSelect(i) },
                 contentAlignment = Alignment.Center,
             ) {
                 Text(o, style = mono(13.sp, if (on) PC.Black else if (ok) PC.Ink else PC.Faint))
@@ -135,15 +141,15 @@ fun SquareToggle(checked: Boolean, onChange: (Boolean) -> Unit) {
     val click = rememberClick()
     Box(
         Modifier
-            .size(width = 46.dp, height = 26.dp)
+            .size(width = 52.dp, height = 32.dp)
             .background(if (checked) PC.Ink else PC.Black)
             .border(1.dp, if (checked) PC.Ink else PC.Dim)
-            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { click(); onChange(!checked) },
+            .toggleable(value = checked, role = Role.Switch, interactionSource = remember { MutableInteractionSource() }, indication = null) { click(); onChange(it) },
     ) {
         Box(
             Modifier
-                .offset(x = if (checked) 22.dp else 2.dp, y = 2.dp)
-                .size(20.dp)
+                .offset(x = if (checked) 24.dp else 2.dp, y = 2.dp)
+                .size(26.dp)
                 .background(if (checked) PC.Black else PC.Dim),
         )
     }
@@ -177,7 +183,7 @@ fun TickSlider(value: Int, min: Int, max: Int, modifier: Modifier = Modifier, on
     Box(
         modifier
             .fillMaxWidth()
-            .height(48.dp)
+            .height(56.dp)
             .onSizeChanged { widthPx = it.width.coerceAtLeast(1) }
             .pointerInput(min, max) {
                 awaitEachGesture {
@@ -191,7 +197,7 @@ fun TickSlider(value: Int, min: Int, max: Int, modifier: Modifier = Modifier, on
                 }
             },
     ) {
-        Canvas(Modifier.fillMaxWidth().height(48.dp)) {
+        Canvas(Modifier.fillMaxWidth().height(56.dp)) {
             val steps = (max - min).coerceAtLeast(1)
             val drawn = steps.coerceAtMost(60)
             for (i in 0..drawn) {

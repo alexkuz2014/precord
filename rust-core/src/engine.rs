@@ -15,6 +15,52 @@ const NORMALIZE_TARGET: f32 = 0.891;
 const NORMALIZE_MAX_GAIN: f32 = 31.6;
 const GATE_FLOOR: f32 = 0.03;
 const CHUNK: usize = 1024;
+/// AGC aims at this mean-absolute level (~ -19 dBFS RMS for speech) and never adds more than +18 dB.
+const AGC_TARGET: f32 = 0.09;
+const AGC_MAX_GAIN: f32 = 8.0;
+/// Below this smoothed level the AGC stops raising gain, so silence / hiss is not pumped up.
+const AGC_FLOOR: f32 = 0.004;
+
+/// Direct-form-II-transposed biquad (RBJ cookbook).
+#[derive(Clone, Copy)]
+pub struct Biquad {
+    b0: f32,
+    b1: f32,
+    b2: f32,
+    a1: f32,
+    a2: f32,
+    z1: f32,
+    z2: f32,
+}
+
+impl Biquad {
+    fn norm(b0: f32, b1: f32, b2: f32, a0: f32, a1: f32, a2: f32) -> Self {
+        Self { b0: b0 / a0, b1: b1 / a0, b2: b2 / a0, a1: a1 / a0, a2: a2 / a0, z1: 0.0, z2: 0.0 }
+    }
+
+    pub fn highpass(sr: f32, f0: f32, q: f32) -> Self {
+        let w = 2.0 * std::f32::consts::PI * f0 / sr;
+        let (sn, cs) = (w.sin(), w.cos());
+        let al = sn / (2.0 * q);
+        Self::norm((1.0 + cs) / 2.0, -(1.0 + cs), (1.0 + cs) / 2.0, 1.0 + al, -2.0 * cs, 1.0 - al)
+    }
+
+    pub fn peaking(sr: f32, f0: f32, q: f32, gain_db: f32) -> Self {
+        let a = 10f32.powf(gain_db / 40.0);
+        let w = 2.0 * std::f32::consts::PI * f0 / sr;
+        let (sn, cs) = (w.sin(), w.cos());
+        let al = sn / (2.0 * q);
+        Self::norm(1.0 + al * a, -2.0 * cs, 1.0 - al * a, 1.0 + al / a, -2.0 * cs, 1.0 - al / a)
+    }
+
+    #[inline]
+    pub fn run(&mut self, x: f32) -> f32 {
+        let y = self.b0 * x + self.z1;
+        self.z1 = self.b1 * x - self.a1 * y + self.z2;
+        self.z2 = self.b2 * x - self.a2 * y;
+        y
+    }
+}
 
 #[derive(Debug, Clone, Copy)]
 pub struct Snapshot {
@@ -31,6 +77,10 @@ impl Snapshot {
 }
 
 struct WriterState {
+    hp: Biquad,
+    eq: Biquad,
+    agc_env: f32,
+    agc_gain: f32,
     env: f32,
     gate_gain: f32,
     acc_sq: f64,
@@ -43,6 +93,12 @@ pub struct Engine {
     ring: RingBuffer,
     gain: AtomicU32,        // f32 bits, linear
     gate_on: AtomicBool,
+    highpass_on: AtomicBool,
+    voice_on: AtomicBool,
+    agc_up: f32,
+    agc_down: f32,
+    agc_env_up: f32,
+    agc_env_down: f32,
     gate_thresh: AtomicU32, // f32 bits, linear
     rms: AtomicU32,
     peak: AtomicU32,
@@ -76,6 +132,12 @@ impl Engine {
             ring,
             gain: AtomicU32::new(1.0f32.to_bits()),
             gate_on: AtomicBool::new(false),
+            highpass_on: AtomicBool::new(false),
+            voice_on: AtomicBool::new(false),
+            agc_up: 1.0 - (-1.0 / (srf * 0.6)).exp(),
+            agc_down: 1.0 - (-1.0 / (srf * 0.02)).exp(),
+            agc_env_up: 1.0 - (-1.0 / (srf * 0.05)).exp(),
+            agc_env_down: 1.0 - (-1.0 / (srf * 0.4)).exp(),
             gate_thresh: AtomicU32::new(db_to_lin(-50.0).to_bits()),
             rms: AtomicU32::new(0),
             peak: AtomicU32::new(0),
@@ -85,7 +147,12 @@ impl Engine {
             env_release: (-1.0 / (srf * 0.100)).exp(),
             gate_attack: 1.0 - (-1.0 / (srf * 0.004)).exp(),
             gate_release: 1.0 - (-1.0 / (srf * 0.060)).exp(),
-            writer: Mutex::new(WriterState { env: 0.0, gate_gain: 1.0, acc_sq: 0.0, acc_peak: 0.0, acc_n: 0 }),
+            writer: Mutex::new(WriterState {
+                hp: Biquad::highpass(srf, 90.0, 0.707),
+                eq: Biquad::peaking(srf, 2800.0, 0.9, 4.0),
+                agc_env: 0.0,
+                agc_gain: 1.0,
+                env: 0.0, gate_gain: 1.0, acc_sq: 0.0, acc_peak: 0.0, acc_n: 0 }),
         })
     }
 
@@ -102,7 +169,9 @@ impl Engine {
     }
 
     /// Live DSP parameters (safe to call from any thread).
-    pub fn set_dsp(&self, gain_db: f32, gate_enabled: bool, gate_db: f32) {
+    pub fn set_dsp(&self, gain_db: f32, gate_enabled: bool, gate_db: f32, highpass: bool, voice: bool) {
+        self.highpass_on.store(highpass, Ordering::Relaxed);
+        self.voice_on.store(voice, Ordering::Relaxed);
         self.gain.store(db_to_lin(gain_db.clamp(-24.0, 36.0)).to_bits(), Ordering::Relaxed);
         self.gate_thresh.store(db_to_lin(gate_db.clamp(-90.0, -10.0)).to_bits(), Ordering::Relaxed);
         self.gate_on.store(gate_enabled, Ordering::Relaxed);
@@ -113,6 +182,8 @@ impl Engine {
         let gain = f32::from_bits(self.gain.load(Ordering::Relaxed));
         let gate_on = self.gate_on.load(Ordering::Relaxed);
         let thresh = f32::from_bits(self.gate_thresh.load(Ordering::Relaxed));
+        let hp_on = self.highpass_on.load(Ordering::Relaxed);
+        let voice = self.voice_on.load(Ordering::Relaxed);
         let mut st = match self.writer.lock() {
             Ok(g) => g,
             Err(p) => p.into_inner(),
@@ -120,13 +191,33 @@ impl Engine {
         let mut out = [0i16; CHUNK];
         for block in input.chunks(CHUNK) {
             for (o, &s) in out.iter_mut().zip(block) {
-                let x = s as f32 * (1.0 / 32768.0);
+                let mut x = s as f32 * (1.0 / 32768.0);
+                if hp_on {
+                    x = st.hp.run(x);
+                }
+                if voice {
+                    x = st.eq.run(x);
+                }
                 let a = x.abs();
                 st.env = if a > st.env { a } else { st.env * self.env_release };
                 let target = if gate_on && st.env < thresh { GATE_FLOOR } else { 1.0 };
                 let coef = if target > st.gate_gain { self.gate_attack } else { self.gate_release };
                 st.gate_gain += (target - st.gate_gain) * coef;
-                let y = x * gain * st.gate_gain;
+                let mut y = x * gain * st.gate_gain;
+                if voice {
+                    // slow auto-level on the gated signal so removed hiss is never lifted
+                    let a = y.abs();
+                    let c = if a > st.agc_env { self.agc_env_up } else { self.agc_env_down };
+                    st.agc_env += (a - st.agc_env) * c;
+                    let want = if st.agc_env < AGC_FLOOR { 1.0 } else { (AGC_TARGET / st.agc_env).clamp(0.7, AGC_MAX_GAIN) };
+                    let k = if want < st.agc_gain { self.agc_down } else { self.agc_up };
+                    st.agc_gain += (want - st.agc_gain) * k;
+                    y *= st.agc_gain;
+                }
+                if y.abs() > 0.9 {
+                    // soft limiter instead of hard clipping
+                    y = y.signum() * (0.9 + 0.08 * ((y.abs() - 0.9) / 0.08).tanh());
+                }
                 *o = (y * 32768.0).round().clamp(-32768.0, 32767.0) as i16;
 
                 let ya = (*o as f32).abs() * (1.0 / 32768.0);
@@ -286,7 +377,7 @@ mod tests {
     #[test]
     fn gain_is_applied() {
         let e = Engine::new(16000, 5000).unwrap();
-        e.set_dsp(6.0206, false, -50.0); // x2
+        e.set_dsp(6.0206, false, -50.0, false, false); // x2
         e.process(&vec![1000i16; 1000]);
         let mut out = vec![0i16; 1000];
         let s = e.plan(1000, false).unwrap();
@@ -297,7 +388,7 @@ mod tests {
     #[test]
     fn noise_gate_attenuates_quiet_and_passes_loud() {
         let e = Engine::new(16000, 10_000).unwrap();
-        e.set_dsp(0.0, true, -40.0);
+        e.set_dsp(0.0, true, -40.0, false, false);
         e.process(&vec![30i16; 16000]); // ~ -60 dBFS hiss
         e.process(&sine(16000, 0.5, 16000.0));
         let mut out = vec![0i16; 32000];
@@ -351,5 +442,58 @@ mod tests {
         let p = tmp("empty.wav");
         assert!(e.save_wav(&p, 1000, false).is_err());
         assert!(!p.exists());
+    }
+
+    fn rms(v: &[i16]) -> f32 {
+        (v.iter().map(|&x| (x as f64 / 32768.0).powi(2)).sum::<f64>() / v.len() as f64).sqrt() as f32
+    }
+
+    fn tone(n: usize, amp: f32, hz: f32, rate: f32) -> Vec<i16> {
+        (0..n).map(|i| ((i as f32 * 2.0 * std::f32::consts::PI * hz / rate).sin() * amp * 32767.0) as i16).collect()
+    }
+
+    fn render(e: &Engine, input: &[i16]) -> Vec<i16> {
+        e.process(input);
+        let mut out = vec![0i16; input.len()];
+        let s = e.plan(input.len() as u64 * 1000 / e.sample_rate() as u64, false).unwrap();
+        assert!(e.read_pcm(s.start, &mut out, 1.0));
+        out
+    }
+
+    #[test]
+    fn highpass_removes_rumble_keeps_voice_band() {
+        let e = Engine::new(16000, 10_000).unwrap();
+        e.set_dsp(0.0, false, -50.0, true, false);
+        let low = render(&e, &tone(16000, 0.5, 20.0, 16000.0));
+        assert!(rms(&low[8000..]) < 0.1 * (0.5 / 2f32.sqrt()), "20 Hz not attenuated: {}", rms(&low[8000..]));
+        let e = Engine::new(16000, 10_000).unwrap();
+        e.set_dsp(0.0, false, -50.0, true, false);
+        let mid = render(&e, &tone(16000, 0.5, 1000.0, 16000.0));
+        let r = rms(&mid[8000..]) / (0.5 / 2f32.sqrt());
+        assert!((0.9..1.1).contains(&r), "1 kHz changed by {r}");
+    }
+
+    #[test]
+    fn voice_boost_lifts_quiet_speech_but_not_silence_floor() {
+        let e = Engine::new(16000, 20_000).unwrap();
+        e.set_dsp(0.0, false, -50.0, false, true);
+        let quiet = tone(16000 * 8, 0.01, 800.0, 16000.0); // ~ -43 dBFS peak
+        let out = render(&e, &quiet);
+        let gain = rms(&out[16000 * 7..]) / rms(&quiet[16000 * 7..]);
+        assert!(gain > 3.0 && gain < 10.0, "speech gain {gain}");
+        let e = Engine::new(16000, 20_000).unwrap();
+        e.set_dsp(0.0, false, -50.0, false, true);
+        let hiss = tone(16000 * 6, 0.0008, 800.0, 16000.0); // below AGC floor
+        let out = render(&e, &hiss);
+        let g = rms(&out[16000 * 5..]) / rms(&hiss[16000 * 5..]);
+        assert!(g < 2.0, "floor was amplified x{g}");
+    }
+
+    #[test]
+    fn limiter_never_overflows() {
+        let e = Engine::new(16000, 10_000).unwrap();
+        e.set_dsp(24.0, false, -50.0, false, true);
+        let out = render(&e, &tone(16000 * 2, 0.9, 500.0, 16000.0));
+        assert!(out.iter().all(|&v| (v as i32).abs() <= 32200));
     }
 }
