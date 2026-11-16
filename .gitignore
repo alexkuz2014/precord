@@ -1,0 +1,9 @@
+/target
+rust-core/target
+.gradle/
+build/
+local.properties
+*.iml
+.idea/
+app/src/main/jniLibs/
+.cxx/
