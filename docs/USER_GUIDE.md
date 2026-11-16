@@ -20,14 +20,16 @@ Precord keeps the last few minutes of microphone audio in memory. When something
 * **Volume Up + Down** (GitHub APK only) - enable the *Precord volume combo* accessibility service; it sees only those two keys.
 
 ## Library
-Search by title/tag. Open a clip to rename it, add tags, **tap the waveform to seek**, **drag the two handles to trim**, play the selection, then *Trim > new copy* or *Trim > replace*. **Share** opens the system share sheet; **Export** copies to `Recordings/Precord`.
+Search by title, tag or transcript. Open a clip to rename it, add tags, **tap the waveform to seek**, **drag the two handles to trim**, play the selection, then *Trim > new copy* or *Trim > replace*. **Transcript** converts speech to text on the phone (Android 13+, needs the offline speech pack for your language; speakers are not separated). **Share** opens the system share sheet; **Export** copies to `Recordings/Precord`.
 
 ## Settings
 * **Sample rate** 16 / 44.1 / 48 kHz - lower = less RAM (16 kHz: 115 MB per hour).
 * **Format** WAV (lossless), M4A (AAC), Opus (16/48 kHz only).
 * **Normalize on save** - raises quiet recordings to -1 dBFS (max +30 dB).
 * **Raw microphone** - turns off phone auto-gain/noise suppression where supported.
-* **Input gain**, **Noise gate**, **Auto-export**.
+* **Noise reduction** - phone noise suppressor + rumble filter. **Voice boost** - makes quiet voices louder without lifting silence. **Suppress device playback** - tries to remove a video/music playing on the same phone from the recording (restarts the buffer; strength depends on the phone). **Input gain**, **Noise gate**, **Auto-export**.
+* **Recording bubble** - floating dot with the buffered time at the top of the screen; tap it to save (asks for *display over other apps*).
+* **Keep alive** - re-arm after the system killed the buffer; open battery settings and set *Unrestricted* on aggressive phones (Xiaomi, Huawei, Samsung, OnePlus), and lock the app in Recents.
 
 ## Tips & limits
 * 60 min @ 48 kHz needs ~345 MB RAM; prefer 16 kHz for hour-long voice buffers.

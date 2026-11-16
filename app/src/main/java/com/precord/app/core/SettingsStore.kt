@@ -26,8 +26,18 @@ class SettingsStore(context: Context) {
             volumeCombo = prefs.getBoolean("volumeCombo", d.volumeCombo),
             autoExport = prefs.getBoolean("autoExport", d.autoExport),
             rawMic = prefs.getBoolean("rawMic", d.rawMic),
+            denoise = prefs.getBoolean("denoise", d.denoise),
+            voiceBoost = prefs.getBoolean("voiceBoost", d.voiceBoost),
+            echoCancel = prefs.getBoolean("echoCancel", d.echoCancel),
+            indicator = prefs.getBoolean("indicator", d.indicator),
+            autoRearm = prefs.getBoolean("autoRearm", d.autoRearm),
         ).coerced()
     }
+
+    /** True while the user wants the buffer armed; stays true if the system kills the process. */
+    var wasArmed: Boolean
+        get() = prefs.getBoolean("wasArmed", false)
+        set(v) = prefs.edit().putBoolean("wasArmed", v).apply()
 
     @Synchronized
     fun update(transform: (PrecordSettings) -> PrecordSettings) {
@@ -44,6 +54,11 @@ class SettingsStore(context: Context) {
             .putBoolean("volumeCombo", s.volumeCombo)
             .putBoolean("autoExport", s.autoExport)
             .putBoolean("rawMic", s.rawMic)
+            .putBoolean("denoise", s.denoise)
+            .putBoolean("voiceBoost", s.voiceBoost)
+            .putBoolean("echoCancel", s.echoCancel)
+            .putBoolean("indicator", s.indicator)
+            .putBoolean("autoRearm", s.autoRearm)
             .apply()
         _flow.value = s
     }

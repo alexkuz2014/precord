@@ -50,6 +50,9 @@ import com.precord.app.core.Clip
 import com.precord.app.core.ClipEditor
 import com.precord.app.core.ClipExporter
 import com.precord.app.core.Fmt
+import com.precord.app.core.TranscribeException
+import com.precord.app.core.Transcriber
+import androidx.compose.foundation.text.selection.SelectionContainer
 import com.precord.app.precord
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -75,6 +78,7 @@ fun ClipDetailScreen(clip: Clip, onClose: () -> Unit) {
     var playFrac by remember { mutableFloatStateOf(-1f) }
     var busy by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
+    var transcribing by remember { mutableStateOf<Pair<Int, Int>?>(null) }
 
     val peaks by produceState(FloatArray(BUCKETS), clip.file.name, clip.sizeBytes) {
         value = withContext(Dispatchers.IO) { ClipEditor.peaks(clip.file, BUCKETS) }
@@ -177,6 +181,42 @@ fun ClipDetailScreen(clip: Clip, onClose: () -> Unit) {
             KeyButton(stringResource(R.string.trim_new), Modifier.weight(1f), enabled = trimmed && !busy) { trim(false) }
             KeyButton(stringResource(R.string.trim_replace), Modifier.weight(1f), enabled = trimmed && !busy) { trim(true) }
         }
+
+        Gap(h = 24)
+        Hairline()
+        Gap(h = 16)
+        Label(stringResource(R.string.transcript))
+        Gap(h = 8)
+        val supported = remember { Transcriber.isSupported(ctx) }
+        when {
+            transcribing != null -> Text(stringResource(R.string.transcribing, transcribing!!.first, transcribing!!.second), style = mono(13.sp, PC.Dim))
+            clip.transcript.isNotBlank() -> {
+                SelectionContainer { Text(clip.transcript, style = body(PC.Ink, 15.sp)) }
+                Gap(h = 8)
+                KeyButton(stringResource(R.string.transcript_copy)) {
+                    (ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager)
+                        .setPrimaryClip(android.content.ClipData.newPlainText(clip.title, clip.transcript))
+                    Toast.makeText(ctx, R.string.transcript_copied, Toast.LENGTH_SHORT).show()
+                }
+            }
+            !supported -> Text(stringResource(R.string.transcript_na), style = body(PC.Dim, 13.sp))
+            else -> KeyButton(stringResource(R.string.transcribe), Modifier.fillMaxWidth()) {
+                scope.launch {
+                    transcribing = 0 to 1
+                    try {
+                        val text = Transcriber.transcribe(ctx, clip.file) { d, t -> transcribing = d to t }
+                        repo.setTranscript(clip.file, text.ifBlank { ctx.getString(R.string.transcript_empty) })
+                    } catch (e: TranscribeException) {
+                        Toast.makeText(ctx, if (e.languagePackMissing) R.string.transcript_pack else R.string.transcript_fail, Toast.LENGTH_LONG).show()
+                    } catch (e: Exception) {
+                        Toast.makeText(ctx, R.string.transcript_fail, Toast.LENGTH_LONG).show()
+                    } finally {
+                        transcribing = null
+                    }
+                }
+            }
+        }
+        Text(stringResource(R.string.transcript_hint), style = body(PC.Faint, 12.sp), modifier = Modifier.padding(top = 6.dp))
 
         Gap(h = 24)
         Hairline()

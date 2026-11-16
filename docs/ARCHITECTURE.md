@@ -20,6 +20,9 @@ AudioRecord ─PCM16─▶ Rust engine ─▶ gain / noise-gate ─▶ meters + 
 
 17 unit tests: wrap-around, overwrite rejection, a concurrent producer/reader torn-read test, gate, normalisation, WAV round trips, trim.
 
+### DSP chain (per sample, `Engine::process`)
+`90 Hz high-pass (optional) → presence peaking EQ (voice) → noise gate → user gain → AGC (voice, frozen below −48 dB floor) → soft limiter → ring buffer`. Platform effects (NoiseSuppressor, AcousticEchoCanceler, VOICE_COMMUNICATION source) are attached in `PrecordService.attachEffects`.
+
 ## Android (`app/`)
 
 | Package | Responsibility |

@@ -52,7 +52,7 @@ fun LibraryScreen(clips: List<Clip>, onOpen: (Clip) -> Unit) {
             }
             val q = query.trim().lowercase()
             val shown = if (q.isEmpty()) clips else clips.filter { c ->
-                c.title.lowercase().contains(q) || c.file.name.lowercase().contains(q) || c.tags.any { it.lowercase().contains(q) }
+                c.title.lowercase().contains(q) || c.file.name.lowercase().contains(q) || c.tags.any { it.lowercase().contains(q) } || c.transcript.lowercase().contains(q)
             }
             Row(Modifier.fillMaxWidth().padding(16.dp, 12.dp), horizontalArrangement = Arrangement.SpaceBetween) {
                 Label(stringResource(R.string.lib_count, shown.size))

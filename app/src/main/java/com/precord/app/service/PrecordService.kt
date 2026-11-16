@@ -15,6 +15,8 @@ import android.media.AudioFormat
 import android.media.AudioManager
 import android.media.AudioRecord
 import android.media.MediaRecorder
+import android.media.audiofx.AcousticEchoCanceler
+import android.media.audiofx.NoiseSuppressor
 import android.os.IBinder
 import android.os.PowerManager
 import android.os.Process
@@ -57,7 +59,10 @@ class PrecordService : Service() {
     private var record: AudioRecord? = null
     private var captureThread: Thread? = null
     @Volatile private var capturing = false
-    private var captureKey: Triple<Int, Int, Boolean>? = null // bufferSec, sampleRate, rawMic currently running
+    private data class CaptureKey(val bufferSec: Int, val rate: Int, val raw: Boolean, val denoise: Boolean, val echo: Boolean)
+    private fun keyOf(s: PrecordSettings) = CaptureKey(s.bufferSec, s.sampleRate, s.rawMic, s.denoise, s.echoCancel)
+
+    private var captureKey: CaptureKey? = null // capture configuration currently running
 
     private var ticker: Job? = null
     private var settingsJob: Job? = null
@@ -65,12 +70,16 @@ class PrecordService : Service() {
     private var shake: ShakeDetector? = null
     private var foregrounded = false
     private var lastNote: String? = null
+    private var overlay: OverlayIndicator? = null
+    private val effects = mutableListOf<android.media.audiofx.AudioEffect>()
+    private var restarts = 0
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onCreate() {
         super.onCreate()
         createChannels()
+        overlay = OverlayIndicator(this)
         shake = ShakeDetector(getSystemService(Context.SENSOR_SERVICE) as SensorManager) { saveReplay(null) }
     }
 
@@ -112,6 +121,8 @@ class PrecordService : Service() {
             stopMonitoring()
             return
         }
+        precord.settings.wasArmed = true
+        restarts = 0
         ticker?.cancel()
         ticker = scope.launch { tickLoop() }
         settingsJob?.cancel()
@@ -121,6 +132,8 @@ class PrecordService : Service() {
     }
 
     private fun stopMonitoring() {
+        precord.settings.wasArmed = false
+        overlay?.hide()
         ticker?.cancel()
         settingsJob?.cancel()
         setScreenOffTriggers(false)
@@ -133,7 +146,13 @@ class PrecordService : Service() {
         stopSelf()
     }
 
+    /** Swiping Precord out of Recents must not stop the buffer: it lives in the foreground service. */
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        super.onTaskRemoved(rootIntent)
+    }
+
     override fun onDestroy() {
+        overlay?.hide()
         ticker?.cancel()
         settingsJob?.cancel()
         shake?.stop()
@@ -179,10 +198,11 @@ class PrecordService : Service() {
             Monitor.update { it.copy(running = false, errorRes = R.string.err_mic_busy, errorArg = null) }
             return false
         }
-        eng.setDsp(s.gainDb.toFloat(), s.gateEnabled, s.gateDb.toFloat())
+        attachEffects(rec, s)
+        eng.setDsp(s)
         engine = eng
         record = rec
-        captureKey = Triple(s.bufferSec, s.sampleRate, s.rawMic)
+        captureKey = keyOf(s)
         capturing = true
         rec.startRecording()
         captureThread = Thread({
@@ -192,13 +212,33 @@ class PrecordService : Service() {
                 val n = rec.read(buf, 0, buf.size)
                 if (n > 0) eng.write(buf, n) else if (n < 0) break
             }
+            if (capturing && engine === eng) {
+                // Read error (mic taken by the system / device switch): re-open the microphone instead of going deaf.
+                scope.launch {
+                    delay(1000)
+                    if (engine === eng && ++restarts <= 5) {
+                        if (!beginCapture(precord.settings.value)) stopMonitoring()
+                    } else if (engine === eng) stopMonitoring()
+                }
+            }
         }, "precord-capture").also { it.start() }
         Monitor.update { it.copy(running = true, errorRes = null, errorArg = null, windowMs = s.windowMs, sampleRate = s.sampleRate, bufferedMs = 0) }
         return true
     }
 
+    /** Platform noise suppressor / echo canceller (present on most, not all, phones). */
+    private fun attachEffects(rec: AudioRecord, s: PrecordSettings) {
+        runCatching {
+            if (s.denoise && NoiseSuppressor.isAvailable()) NoiseSuppressor.create(rec.audioSessionId)?.also { it.enabled = true; effects += it }
+            if (s.echoCancel && AcousticEchoCanceler.isAvailable()) AcousticEchoCanceler.create(rec.audioSessionId)?.also { it.enabled = true; effects += it }
+        }
+    }
+
     /** UNPROCESSED bypasses AGC / noise suppression where the device supports it. */
     private fun audioSource(s: PrecordSettings): Int {
+        // Call-mode source: the platform echo canceller gets the phone's own playback as reference,
+        // which is what removes a video/music playing on this device from the recording.
+        if (s.echoCancel) return MediaRecorder.AudioSource.VOICE_COMMUNICATION
         if (s.rawMic) {
             val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
             if (am.getProperty(AudioManager.PROPERTY_SUPPORT_AUDIO_SOURCE_UNPROCESSED) == "true") return MediaRecorder.AudioSource.UNPROCESSED
@@ -211,6 +251,8 @@ class PrecordService : Service() {
         runCatching { record?.stop() }
         captureThread?.join(1000)
         captureThread = null
+        effects.forEach { runCatching { it.release() } }
+        effects.clear()
         record?.release()
         record = null
         engine?.close()
@@ -220,9 +262,10 @@ class PrecordService : Service() {
 
     private fun applySettings(s: PrecordSettings) {
         val eng = engine ?: return
-        eng.setDsp(s.gainDb.toFloat(), s.gateEnabled, s.gateDb.toFloat())
+        eng.setDsp(s)
         setScreenOffTriggers(s.shakeToSave)
-        if (captureKey != Triple(s.bufferSec, s.sampleRate, s.rawMic)) {
+        if (s.indicator && overlay?.canShow() == true) overlay?.show() else overlay?.hide()
+        if (captureKey != keyOf(s)) {
             // Different buffer length / sample rate needs a fresh ring (the old audio cannot be reinterpreted).
             if (!beginCapture(s)) stopMonitoring()
         }
@@ -262,7 +305,10 @@ class PrecordService : Service() {
                     // Background: 1 Hz bookkeeping only (tile subtitle, notification) - saves CPU and battery.
                     Monitor.update { it.copy(running = true, bufferedMs = buffered, windowMs = eng.windowMs, sampleRate = eng.sampleRate) }
                 }
-                if (n % (if (visible) 25 else 5) == 0) updateNotification(buffered, eng.windowMs)
+                if (n % (if (visible) 25 else 5) == 0) {
+                    updateNotification(buffered, eng.windowMs)
+                    overlay?.update(Fmt.clock(buffered))
+                }
             }
             n++
             delay(if (visible) 40L else 200L)

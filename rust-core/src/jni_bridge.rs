@@ -72,9 +72,11 @@ pub extern "system" fn Java_com_precord_app_core_NativeBridge_nativeSetDsp(
     gain_db: jfloat,
     gate_enabled: jboolean,
     gate_db: jfloat,
+    highpass: jboolean,
+    voice: jboolean,
 ) {
     if let Some(e) = engine(handle) {
-        e.set_dsp(gain_db, gate_enabled == JNI_TRUE, gate_db);
+        e.set_dsp(gain_db, gate_enabled == JNI_TRUE, gate_db, highpass == JNI_TRUE, voice == JNI_TRUE);
     }
 }
 

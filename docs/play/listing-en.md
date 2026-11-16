@@ -23,6 +23,9 @@ BUILT FOR REAL AUDIO
 • 16 / 44.1 / 48 kHz, lossless WAV, M4A (AAC) or Opus
 • Auto-normalise quiet, distant voices when saving
 • Input gain, noise gate, raw-microphone mode
+• Noise reduction, voice boost, suppress video playing on the same phone
+• On-device speech-to-text (Android 13+)
+• Optional recording bubble, keep-alive protection
 • Exact RAM estimate for every setting
 
 CLIP LIBRARY & EDITOR

@@ -25,6 +25,11 @@ data class PrecordSettings(
     val volumeCombo: Boolean = false,
     val autoExport: Boolean = false,
     val rawMic: Boolean = false,
+    val denoise: Boolean = false,
+    val voiceBoost: Boolean = false,
+    val echoCancel: Boolean = false,
+    val indicator: Boolean = false,
+    val autoRearm: Boolean = true,
 ) {
     val windowMs: Long get() = bufferSec * 1000L
 
@@ -44,6 +49,7 @@ data class Clip(
     val sizeBytes: Long,
     val createdAt: Long,
     val sampleRate: Int,
+    val transcript: String = "",
 ) {
     val format: ClipFormat get() = ClipFormat.fromFile(file)
 }

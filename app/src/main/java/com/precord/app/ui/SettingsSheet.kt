@@ -81,6 +81,12 @@ fun SettingsSheet(settings: PrecordSettings, onChange: ((PrecordSettings) -> Pre
             Text(stringResource(R.string.format_hint), style = body(PC.Dim, 12.sp), modifier = Modifier.padding(top = 6.dp))
 
             SectionTitle(stringResource(R.string.processing))
+            ToggleRow(stringResource(R.string.denoise), stringResource(R.string.denoise_sub), settings.denoise) { v -> onChange { it.copy(denoise = v) } }
+            Hairline()
+            ToggleRow(stringResource(R.string.voice_boost), stringResource(R.string.voice_boost_sub), settings.voiceBoost) { v -> onChange { it.copy(voiceBoost = v) } }
+            Hairline()
+            ToggleRow(stringResource(R.string.echo_cancel), stringResource(R.string.echo_cancel_sub), settings.echoCancel) { v -> onChange { it.copy(echoCancel = v) } }
+            Hairline()
             ToggleRow(stringResource(R.string.normalize), stringResource(R.string.normalize_sub), settings.normalize) { v -> onChange { it.copy(normalize = v) } }
             Hairline()
             ToggleRow(stringResource(R.string.raw_mic), stringResource(R.string.raw_mic_sub), settings.rawMic) { v -> onChange { it.copy(rawMic = v) } }
@@ -114,6 +120,23 @@ fun SettingsSheet(settings: PrecordSettings, onChange: ((PrecordSettings) -> Pre
             }
             Hairline()
             Text(stringResource(R.string.triggers_hint), style = body(PC.Dim, 12.sp), modifier = Modifier.padding(top = 10.dp))
+
+            Hairline()
+            ToggleRow(stringResource(R.string.indicator), stringResource(R.string.indicator_sub), settings.indicator) { v -> onChange { it.copy(indicator = v) } }
+            if (settings.indicator && !Settings.canDrawOverlays(ctx)) {
+                KeyButton(stringResource(R.string.grant_overlay), Modifier.fillMaxWidth().padding(bottom = 8.dp), filled = true) {
+                    ctx.startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${ctx.packageName}")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                }
+            }
+
+            SectionTitle(stringResource(R.string.keepalive))
+            ToggleRow(stringResource(R.string.auto_rearm), stringResource(R.string.auto_rearm_sub), settings.autoRearm) { v -> onChange { it.copy(autoRearm = v) } }
+            val pm = ctx.getSystemService(android.content.Context.POWER_SERVICE) as android.os.PowerManager
+            val unrestricted = pm.isIgnoringBatteryOptimizations(ctx.packageName)
+            KeyButton(stringResource(if (unrestricted) R.string.battery_ok else R.string.battery_restricted), Modifier.fillMaxWidth().padding(top = 4.dp), filled = !unrestricted) {
+                ctx.startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            }
+            Text(stringResource(R.string.keepalive_hint), style = body(PC.Dim, 12.sp), modifier = Modifier.padding(top = 8.dp))
 
             SectionTitle(stringResource(R.string.storage))
             ToggleRow(stringResource(R.string.auto_export), stringResource(R.string.auto_export_sub), settings.autoExport) { v -> onChange { it.copy(autoExport = v) } }
