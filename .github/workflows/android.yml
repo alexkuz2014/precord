@@ -23,9 +23,9 @@ jobs:
         run: |
           echo "SDK=$ANDROID_HOME NDK=$ANDROID_NDK_HOME"
           test -d "$ANDROID_NDK_HOME" || { echo "no preinstalled NDK"; exit 1; }
-          ./gradlew assembleDebug
+          ./gradlew assembleFullDebug assemblePlayDebug
       - uses: actions/upload-artifact@v4
         with:
           name: precord-debug-apk
-          path: app/build/outputs/apk/debug/*.apk
+          path: app/build/outputs/apk/full/debug/*.apk
           if-no-files-found: error

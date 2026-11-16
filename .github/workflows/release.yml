@@ -6,7 +6,7 @@ on:
 permissions:
   contents: write
 jobs:
-  apk:
+  release:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
@@ -18,26 +18,41 @@ jobs:
           cargo install cargo-ndk --locked
       - name: Test engine
         run: cargo test --manifest-path rust-core/Cargo.toml
-      - name: Pick release tag
-        id: tag
+      - name: Pick version
+        id: ver
         run: |
-          if [[ "$GITHUB_REF" == refs/tags/* ]]; then TAG="$GITHUB_REF_NAME"; else TAG="v1.0.${GITHUB_RUN_NUMBER}"; fi
-          echo "name=$TAG" >> "$GITHUB_OUTPUT"
-      - name: Build release APK (debug-key signed, installable directly)
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then TAG="$GITHUB_REF_NAME"; else TAG="v1.1.${GITHUB_RUN_NUMBER}"; fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "name=${TAG#v}" >> "$GITHUB_OUTPUT"
+      - name: Restore upload keystore (optional)
+        env:
+          KEYSTORE_B64: ${{ secrets.PRECORD_KEYSTORE_B64 }}
         run: |
-          echo "SDK=$ANDROID_HOME NDK=$ANDROID_NDK_HOME"
-          test -d "$ANDROID_NDK_HOME" || { echo "no preinstalled NDK"; exit 1; }
-          ./gradlew assembleRelease
-          cp app/build/outputs/apk/release/*.apk "precord-${{ steps.tag.outputs.name }}.apk"
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/precord.jks"
+            echo "PRECORD_KEYSTORE_PATH=$RUNNER_TEMP/precord.jks" >> "$GITHUB_ENV"
+            echo "PRECORD_KEYSTORE_PASSWORD=${{ secrets.PRECORD_KEYSTORE_PASSWORD }}" >> "$GITHUB_ENV"
+            echo "PRECORD_KEY_ALIAS=${{ secrets.PRECORD_KEY_ALIAS }}" >> "$GITHUB_ENV"
+            echo "PRECORD_KEY_PASSWORD=${{ secrets.PRECORD_KEY_PASSWORD }}" >> "$GITHUB_ENV"
+          else
+            echo "No keystore secret: release builds are signed with the debug key (fine for sideloading, NOT for Google Play)."
+          fi
+      - name: Build APK (full) and AAB (play)
+        run: |
+          ./gradlew assembleFullRelease bundlePlayRelease \
+            -Pprecord.versionCode=${{ github.run_number }} -Pprecord.versionName=${{ steps.ver.outputs.name }}
+          mkdir -p dist
+          cp app/build/outputs/apk/full/release/*.apk "dist/precord-${{ steps.ver.outputs.tag }}.apk"
+          cp app/build/outputs/bundle/playRelease/*.aab "dist/precord-play-${{ steps.ver.outputs.tag }}.aab"
       - uses: actions/upload-artifact@v4
         with:
-          name: precord-release-apk
-          path: precord-*.apk
+          name: precord-release
+          path: dist/*
           if-no-files-found: error
       - name: Publish GitHub release (creates the tag if missing)
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.tag.outputs.name }}
+          tag_name: ${{ steps.ver.outputs.tag }}
           target_commitish: ${{ github.sha }}
-          files: precord-*.apk
+          files: dist/*
           generate_release_notes: true

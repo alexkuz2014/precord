@@ -5,6 +5,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
@@ -29,12 +30,30 @@ class MainActivity : ComponentActivity() {
             navigationBarStyle = SystemBarStyle.dark(android.graphics.Color.BLACK),
         )
         setContent { PrecordTheme { PrecordRoot(onArm = ::arm) } }
-        if (savedInstanceState == null) handle(intent)
+        if (savedInstanceState == null) {
+            handle(intent)
+            // The system (or a task killer) stopped a buffer the user had armed: bring it back.
+            if (precord.settings.wasArmed && precord.settings.value.autoRearm && !Monitor.state.value.running &&
+                granted(Manifest.permission.RECORD_AUDIO)) {
+                startBuffer()
+                Toast.makeText(this, R.string.banner_rearmed, Toast.LENGTH_LONG).show()
+            }
+        }
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         handle(intent)
+    }
+
+    override fun onStart() {
+        super.onStart()
+        Monitor.uiVisible.value = true
+    }
+
+    override fun onStop() {
+        Monitor.uiVisible.value = false
+        super.onStop()
     }
 
     private fun handle(i: Intent?) {
