@@ -41,7 +41,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 
 @Composable
-fun PrecordRoot(onArm: () -> Unit) {
+fun PrecordRoot(onArm: () -> Unit, onAllowCapture: () -> Unit) {
     val ctx = LocalContext.current
     val app = ctx.precord
     val state by Monitor.state.collectAsState()
@@ -84,6 +84,7 @@ fun PrecordRoot(onArm: () -> Unit) {
                             onArmToggle = { if (state.running) ServiceController.stop(ctx) else onArm() },
                             onSave = { last -> ServiceController.save(ctx, last) },
                             onBufferSec = { sec -> app.settings.update { it.copy(bufferSec = sec) } },
+                            onAllowCapture = onAllowCapture,
                         )
                     } else {
                         LibraryScreen(clips) { openName = it.file.name }
@@ -111,7 +112,7 @@ fun PrecordRoot(onArm: () -> Unit) {
 
     BackHandler(enabled = open == null && tab == 1) { tab = 0 }
 
-    if (showSettings) SettingsSheet(settings, onChange = { f -> app.settings.update(f) }) { showSettings = false }
+    if (showSettings) SettingsSheet(settings, state.running, onChange = { f -> app.settings.update(f) }, onAllowCapture = onAllowCapture) { showSettings = false }
 }
 
 @Composable

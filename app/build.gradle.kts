@@ -13,7 +13,7 @@ android {
         minSdk = 29
         targetSdk = 35
         versionCode = (findProperty("precord.versionCode") as String?)?.toInt() ?: 1
-        versionName = (findProperty("precord.versionName") as String?) ?: "1.2.0"
+        versionName = (findProperty("precord.versionName") as String?) ?: "1.3.0"
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64") }
     }
 

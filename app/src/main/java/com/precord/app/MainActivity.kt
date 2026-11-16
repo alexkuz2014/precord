@@ -4,7 +4,9 @@ import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
+import android.media.projection.MediaProjectionManager
 import android.os.Bundle
+import com.precord.app.core.MicMode
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
@@ -23,19 +25,31 @@ class MainActivity : ComponentActivity() {
         if (granted(Manifest.permission.RECORD_AUDIO) && !Monitor.state.value.running) startBuffer()
     }
 
+    /** Android's "allow Precord to capture audio" dialog, needed for playback subtraction. */
+    private val capture = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { r ->
+        if (r.resultCode == RESULT_OK && r.data != null) runCatching { ServiceController.start(this, r.resultCode, r.data) }
+        else if (!Monitor.state.value.running) runCatching { ServiceController.start(this) }
+    }
+
+    /** Called from the UI when playback subtraction is selected but not yet permitted. */
+    fun requestPlaybackCapture() {
+        val mgr = getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+        runCatching { capture.launch(mgr.createScreenCaptureIntent()) }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge(
             statusBarStyle = SystemBarStyle.dark(android.graphics.Color.BLACK),
             navigationBarStyle = SystemBarStyle.dark(android.graphics.Color.BLACK),
         )
-        setContent { PrecordTheme { PrecordRoot(onArm = ::arm) } }
+        setContent { PrecordTheme { PrecordRoot(onArm = ::arm, onAllowCapture = ::requestPlaybackCapture) } }
         if (savedInstanceState == null) {
             handle(intent)
             // The system (or a task killer) stopped a buffer the user had armed: bring it back.
             if (precord.settings.wasArmed && precord.settings.value.autoRearm && !Monitor.state.value.running &&
                 granted(Manifest.permission.RECORD_AUDIO)) {
-                startBuffer()
+                runCatching { ServiceController.start(this) } // capture consent, if needed, is offered on the deck
                 Toast.makeText(this, R.string.banner_rearmed, Toast.LENGTH_LONG).show()
             }
         }
@@ -76,7 +90,8 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun startBuffer() {
-        runCatching { ServiceController.start(this) }
+        if (precord.settings.value.micMode == MicMode.PLAYBACK) requestPlaybackCapture()
+        else runCatching { ServiceController.start(this) }
     }
 
     companion object {

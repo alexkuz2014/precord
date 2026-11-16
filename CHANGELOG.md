@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.3.0
+* **Remove phone audio (new engine):** the app now receives the exact audio the phone is playing (Android AudioPlaybackCapture) and subtracts it from the microphone with an adaptive filter written in Rust (delay tracking + NLMS with double-talk protection). Replaces the old call-mode approach that also ducked the user's voice.
+* **No more conflicting settings:** one *Microphone mode* choice (Standard / Noise reduction / Remove phone audio / Raw) instead of independent switches; old settings are migrated.
+* **Status bar instead of an overlay:** the floating bubble and the "display over other apps" permission are gone. Android 16+ shows the buffered time as a status-bar chip (Live Update); older versions keep the system mic indicator + notification.
+* **Deck fits the screen:** flexible layout without scrolling on phones; quick-save keys and the arm switch share one row.
+* **Transcription:** language picker, offline-pack status and download from the app, optional online fallback, "transcribe again".
+* Settings regrouped (Capture / Sound / Saving / Triggers / Transcription / Keep alive). Scope fade, ring write-head marker.
+* Rust: 24 unit tests.
+
 ## 1.2.0
 * **Noise reduction:** platform noise suppressor + 90 Hz rumble filter (Rust biquad).
 * **Voice boost:** presence EQ (+4 dB @ 2.8 kHz) and slow auto-level (up to +18 dB, frozen below a noise floor so hiss is not pumped), soft limiter.

@@ -50,6 +50,7 @@ import com.precord.app.core.Clip
 import com.precord.app.core.ClipEditor
 import com.precord.app.core.ClipExporter
 import com.precord.app.core.Fmt
+import com.precord.app.core.PackState
 import com.precord.app.core.TranscribeException
 import com.precord.app.core.Transcriber
 import androidx.compose.foundation.text.selection.SelectionContainer
@@ -79,6 +80,7 @@ fun ClipDetailScreen(clip: Clip, onClose: () -> Unit) {
     var busy by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
     var transcribing by remember { mutableStateOf<Pair<Int, Int>?>(null) }
+    var packProgress by remember { mutableStateOf<Int?>(null) }
 
     val peaks by produceState(FloatArray(BUCKETS), clip.file.name, clip.sizeBytes) {
         value = withContext(Dispatchers.IO) { ClipEditor.peaks(clip.file, BUCKETS) }
@@ -187,34 +189,60 @@ fun ClipDetailScreen(clip: Clip, onClose: () -> Unit) {
         Gap(h = 16)
         Label(stringResource(R.string.transcript))
         Gap(h = 8)
-        val supported = remember { Transcriber.isSupported(ctx) }
+        val settings = ctx.precord.settings.value
+        fun toast(id: Int) = Toast.makeText(ctx, id, Toast.LENGTH_LONG).show()
+        fun runTranscribe() {
+            scope.launch {
+                val tag = Transcriber.tag(settings)
+                try {
+                    // 1. make sure an engine + language pack exist (download the pack when the phone offers it)
+                    var online = false
+                    var state = Transcriber.packState(ctx, tag)
+                    if (state == PackState.DOWNLOADABLE || state == PackState.DOWNLOADING) {
+                        packProgress = 0
+                        val ok = Transcriber.downloadPack(ctx, tag) { packProgress = it }
+                        packProgress = null
+                        state = if (ok) PackState.INSTALLED else Transcriber.packState(ctx, tag)
+                        if (state != PackState.INSTALLED && !settings.sttOnline) { toast(R.string.stt_pack_scheduled); return@launch }
+                    }
+                    if (state == PackState.UNSUPPORTED || (state != PackState.INSTALLED && state != PackState.UNKNOWN)) {
+                        if (!settings.sttOnline) {
+                            toast(if (Transcriber.hasOnDevice(ctx)) R.string.stt_unsupported_long else R.string.stt_no_engine)
+                            return@launch
+                        }
+                        online = true
+                    }
+                    // 2. recognise
+                    transcribing = 0 to 1
+                    val text = Transcriber.transcribe(ctx, clip.file, tag, online) { d, t -> transcribing = d to t }
+                    repo.setTranscript(clip.file, text.ifBlank { ctx.getString(R.string.transcript_empty) })
+                } catch (e: TranscribeException) {
+                    toast(if (e.languagePackMissing) R.string.stt_unsupported_long else R.string.transcript_fail)
+                } catch (e: Exception) {
+                    toast(R.string.transcript_fail)
+                } finally {
+                    transcribing = null
+                    packProgress = null
+                }
+            }
+        }
         when {
+            packProgress != null -> Text(stringResource(R.string.stt_pack_progress, packProgress!!), style = mono(13.sp, PC.Dim))
             transcribing != null -> Text(stringResource(R.string.transcribing, transcribing!!.first, transcribing!!.second), style = mono(13.sp, PC.Dim))
             clip.transcript.isNotBlank() -> {
                 SelectionContainer { Text(clip.transcript, style = body(PC.Ink, 15.sp)) }
                 Gap(h = 8)
-                KeyButton(stringResource(R.string.transcript_copy)) {
-                    (ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager)
-                        .setPrimaryClip(android.content.ClipData.newPlainText(clip.title, clip.transcript))
-                    Toast.makeText(ctx, R.string.transcript_copied, Toast.LENGTH_SHORT).show()
-                }
-            }
-            !supported -> Text(stringResource(R.string.transcript_na), style = body(PC.Dim, 13.sp))
-            else -> KeyButton(stringResource(R.string.transcribe), Modifier.fillMaxWidth()) {
-                scope.launch {
-                    transcribing = 0 to 1
-                    try {
-                        val text = Transcriber.transcribe(ctx, clip.file) { d, t -> transcribing = d to t }
-                        repo.setTranscript(clip.file, text.ifBlank { ctx.getString(R.string.transcript_empty) })
-                    } catch (e: TranscribeException) {
-                        Toast.makeText(ctx, if (e.languagePackMissing) R.string.transcript_pack else R.string.transcript_fail, Toast.LENGTH_LONG).show()
-                    } catch (e: Exception) {
-                        Toast.makeText(ctx, R.string.transcript_fail, Toast.LENGTH_LONG).show()
-                    } finally {
-                        transcribing = null
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    KeyButton(stringResource(R.string.transcript_copy), Modifier.weight(1f)) {
+                        (ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager)
+                            .setPrimaryClip(android.content.ClipData.newPlainText(clip.title, clip.transcript))
+                        Toast.makeText(ctx, R.string.transcript_copied, Toast.LENGTH_SHORT).show()
                     }
+                    KeyButton(stringResource(R.string.transcribe_again), Modifier.weight(1f)) { runTranscribe() }
                 }
             }
+            !Transcriber.isSupported(ctx) -> Text(stringResource(R.string.stt_no_engine), style = body(PC.Dim, 13.sp))
+            else -> KeyButton(stringResource(R.string.transcribe), Modifier.fillMaxWidth(), filled = true) { runTranscribe() }
         }
         Text(stringResource(R.string.transcript_hint), style = body(PC.Faint, 12.sp), modifier = Modifier.padding(top = 6.dp))
 

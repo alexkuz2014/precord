@@ -7,6 +7,7 @@
 //! * [`wav`]    – WAV header parsing, waveform peaks and lossless trimming.
 //! * `jni_bridge` – the `extern "system"` surface used by Kotlin.
 
+pub mod aec;
 pub mod engine;
 pub mod ring;
 pub mod wav;

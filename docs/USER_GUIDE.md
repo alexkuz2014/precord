@@ -27,8 +27,9 @@ Search by title, tag or transcript. Open a clip to rename it, add tags, **tap th
 * **Format** WAV (lossless), M4A (AAC), Opus (16/48 kHz only).
 * **Normalize on save** - raises quiet recordings to -1 dBFS (max +30 dB).
 * **Raw microphone** - turns off phone auto-gain/noise suppression where supported.
-* **Noise reduction** - phone noise suppressor + rumble filter. **Voice boost** - makes quiet voices louder without lifting silence. **Suppress device playback** - tries to remove a video/music playing on the same phone from the recording (restarts the buffer; strength depends on the phone). **Input gain**, **Noise gate**, **Auto-export**.
-* **Recording bubble** - floating dot with the buffered time at the top of the screen; tap it to save (asks for *display over other apps*).
+* **Microphone mode** (one choice): *Standard*, *Noise reduction*, *Raw*, or *Remove phone audio* - Precord receives the audio this phone is playing and subtracts it from the microphone while keeping your voice. Android asks for a capture permission every time you arm; apps that forbid capture (calls, some streaming apps) cannot be removed; headphones need no removal. **Voice boost** - makes quiet voices louder without lifting silence. **Input gain**, **Noise gate**, **Auto-export**.
+* **Status bar** - on Android 16+ the buffered time appears as a chip in the status bar; older versions show the system microphone indicator and the notification.
+* **Transcription** - choose the language, download its offline pack, optionally allow online recognition.
 * **Keep alive** - re-arm after the system killed the buffer; open battery settings and set *Unrestricted* on aggressive phones (Xiaomi, Huawei, Samsung, OnePlus), and lock the app in Recents.
 
 ## Tips & limits

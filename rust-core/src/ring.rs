@@ -218,6 +218,10 @@ mod tests {
                     counter = counter.wrapping_add(1);
                 }
                 p.write(&block);
+                if counter % (256 * 16) == 0 {
+                    std::thread::yield_now(); // behave like a paced audio thread
+                    std::thread::sleep(std::time::Duration::from_micros(50));
+                }
             }
         });
         let mut ok = 0;
