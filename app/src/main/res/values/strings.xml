@@ -1,0 +1,8 @@
+<resources>
+    <string name="app_name">Precord</string>
+    <string name="tile_label">Precord</string>
+    <string name="a11y_label">Precord volume combo</string>
+    <string name="a11y_description">Lets Precord detect a Volume Up + Volume Down press so you can save a replay with the screen off. Precord only reads those two hardware keys; it never reads screen content.</string>
+    <string name="channel_monitor">Buffer status</string>
+    <string name="channel_saved">Saved clips</string>
+</resources>

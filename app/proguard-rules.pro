@@ -1,0 +1,2 @@
+-keep class com.precord.app.core.NativeBridge { *; }
+-keepclasseswithmembernames class * { native <methods>; }
