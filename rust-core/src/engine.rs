@@ -77,6 +77,7 @@ impl Snapshot {
 }
 
 struct WriterState {
+    aec: Option<crate::aec::Aec>,
     hp: Biquad,
     eq: Biquad,
     agc_env: f32,
@@ -148,6 +149,7 @@ impl Engine {
             gate_attack: 1.0 - (-1.0 / (srf * 0.004)).exp(),
             gate_release: 1.0 - (-1.0 / (srf * 0.060)).exp(),
             writer: Mutex::new(WriterState {
+                aec: None,
                 hp: Biquad::highpass(srf, 90.0, 0.707),
                 eq: Biquad::peaking(srf, 2800.0, 0.9, 4.0),
                 agc_env: 0.0,
@@ -179,6 +181,20 @@ impl Engine {
 
     /// Audio-thread entry point: DSP -> meters/scope -> ring buffer. Allocation free.
     pub fn process(&self, input: &[i16]) {
+        self.process_inner(input, None)
+    }
+
+    /// Like [`process`], but first subtracts the device's own playback (`reference`, same length and
+    /// rate as `input`) from the microphone signal.
+    pub fn process_with_ref(&self, input: &[i16], reference: &[i16]) {
+        if reference.len() == input.len() {
+            self.process_inner(input, Some(reference))
+        } else {
+            self.process_inner(input, None)
+        }
+    }
+
+    fn process_inner(&self, input: &[i16], reference: Option<&[i16]>) {
         let gain = f32::from_bits(self.gain.load(Ordering::Relaxed));
         let gate_on = self.gate_on.load(Ordering::Relaxed);
         let thresh = f32::from_bits(self.gate_thresh.load(Ordering::Relaxed));
@@ -188,10 +204,16 @@ impl Engine {
             Ok(g) => g,
             Err(p) => p.into_inner(),
         };
+        if reference.is_some() && st.aec.is_none() {
+            st.aec = Some(crate::aec::Aec::new(self.sample_rate)); // one-time allocation when the mode is first used
+        }
         let mut out = [0i16; CHUNK];
-        for block in input.chunks(CHUNK) {
-            for (o, &s) in out.iter_mut().zip(block) {
+        for (bi, block) in input.chunks(CHUNK).enumerate() {
+            for (si, (o, &s)) in out.iter_mut().zip(block).enumerate() {
                 let mut x = s as f32 * (1.0 / 32768.0);
+                if let (Some(r), Some(aec)) = (reference, st.aec.as_mut()) {
+                    x = aec.process(x, r[bi * CHUNK + si] as f32 * (1.0 / 32768.0));
+                }
                 if hp_on {
                     x = st.hp.run(x);
                 }
@@ -495,5 +517,32 @@ mod tests {
         e.set_dsp(24.0, false, -50.0, false, true);
         let out = render(&e, &tone(16000 * 2, 0.9, 500.0, 16000.0));
         assert!(out.iter().all(|&v| (v as i32).abs() <= 32200));
+    }
+
+    #[test]
+    fn reference_playback_is_removed_from_the_buffer() {
+        let sr = 16000usize;
+        let n = sr * 6;
+        let mut seed = 5u32;
+        let mut lp = 0.0f32;
+        let playback: Vec<i16> = (0..n)
+            .map(|i| {
+                seed = seed.wrapping_mul(1664525).wrapping_add(1013904223);
+                lp += 0.3 * (((seed >> 8) as f32 / 8_388_608.0 - 1.0) - lp);
+                let env = 0.3 + 0.25 * (i as f32 / sr as f32 * 4.1).sin();
+                (lp * env * 20000.0) as i16
+            })
+            .collect();
+        let mic: Vec<i16> = (0..n).map(|i| if i >= 1200 { playback[i - 1200] / 2 } else { 0 }).collect();
+        let e = Engine::new(sr as u32, 10_000).unwrap();
+        for (m, r) in mic.chunks(640).zip(playback.chunks(640)) {
+            e.process_with_ref(m, r);
+        }
+        let mut out = vec![0i16; n];
+        let s = e.plan(6000, false).unwrap();
+        assert!(e.read_pcm(s.start, &mut out, 1.0));
+        let before = rms(&mic[sr * 5..]);
+        let after = rms(&out[sr * 5..]);
+        assert!(after < before * 0.15, "playback not removed: {after} vs {before}");
     }
 }

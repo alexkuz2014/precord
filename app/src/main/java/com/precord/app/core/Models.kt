@@ -13,6 +13,12 @@ enum class ClipFormat(val label: String, val ext: String, val mime: String) {
     }
 }
 
+/**
+ * One microphone mode at a time - these options exclude each other by nature (raw vs processed vs
+ * playback-subtracted), so they are a single choice instead of independent switches.
+ */
+enum class MicMode { STANDARD, RAW, DENOISE, PLAYBACK }
+
 data class PrecordSettings(
     val bufferSec: Int = 300,
     val sampleRate: Int = 48_000,
@@ -24,12 +30,12 @@ data class PrecordSettings(
     val shakeToSave: Boolean = false,
     val volumeCombo: Boolean = false,
     val autoExport: Boolean = false,
-    val rawMic: Boolean = false,
-    val denoise: Boolean = false,
+    val micMode: MicMode = MicMode.STANDARD,
     val voiceBoost: Boolean = false,
-    val echoCancel: Boolean = false,
-    val indicator: Boolean = false,
     val autoRearm: Boolean = true,
+    /** BCP-47 tag for transcription, empty = system language. */
+    val sttLang: String = "",
+    val sttOnline: Boolean = false,
 ) {
     val windowMs: Long get() = bufferSec * 1000L
 
@@ -39,6 +45,9 @@ data class PrecordSettings(
     /** Opus only supports 8/12/16/24/48 kHz. */
     fun coerced(): PrecordSettings =
         if (format == ClipFormat.OPUS && sampleRate == 44_100) copy(format = ClipFormat.M4A) else this
+
+    /** The Rust rumble filter belongs to the noise-reduction mode. */
+    val highpass: Boolean get() = micMode == MicMode.DENOISE
 }
 
 data class Clip(

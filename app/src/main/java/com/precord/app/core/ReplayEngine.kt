@@ -39,8 +39,11 @@ class ReplayEngine private constructor(
 
     fun write(pcm: ShortArray, len: Int) = withHandle(Unit) { NativeBridge.nativeWrite(it, pcm, len) }
 
+    /** Microphone block plus the device playback captured for the same block. */
+    fun writeRef(pcm: ShortArray, reference: ShortArray, len: Int) = withHandle(Unit) { NativeBridge.nativeWriteRef(it, pcm, reference, len) }
+
     fun setDsp(s: PrecordSettings) = withHandle(Unit) {
-        NativeBridge.nativeSetDsp(it, s.gainDb.toFloat(), s.gateEnabled, s.gateDb.toFloat(), s.denoise, s.voiceBoost)
+        NativeBridge.nativeSetDsp(it, s.gainDb.toFloat(), s.gateEnabled, s.gateDb.toFloat(), s.highpass, s.voiceBoost)
     }
 
     /** (rms, peak) linear 0..1 of the latest 20 ms. Not thread-safe across callers (UI ticker only). */

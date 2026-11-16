@@ -25,11 +25,16 @@ class SettingsStore(context: Context) {
             shakeToSave = prefs.getBoolean("shake", d.shakeToSave),
             volumeCombo = prefs.getBoolean("volumeCombo", d.volumeCombo),
             autoExport = prefs.getBoolean("autoExport", d.autoExport),
-            rawMic = prefs.getBoolean("rawMic", d.rawMic),
-            denoise = prefs.getBoolean("denoise", d.denoise),
+            micMode = prefs.getString("micMode", null)?.let { runCatching { MicMode.valueOf(it) }.getOrNull() }
+                ?: when { // migrate the pre-1.3 independent switches
+                    prefs.getBoolean("echoCancel", false) -> MicMode.PLAYBACK
+                    prefs.getBoolean("rawMic", false) -> MicMode.RAW
+                    prefs.getBoolean("denoise", false) -> MicMode.DENOISE
+                    else -> MicMode.STANDARD
+                },
             voiceBoost = prefs.getBoolean("voiceBoost", d.voiceBoost),
-            echoCancel = prefs.getBoolean("echoCancel", d.echoCancel),
-            indicator = prefs.getBoolean("indicator", d.indicator),
+            sttLang = prefs.getString("sttLang", d.sttLang) ?: "",
+            sttOnline = prefs.getBoolean("sttOnline", d.sttOnline),
             autoRearm = prefs.getBoolean("autoRearm", d.autoRearm),
         ).coerced()
     }
@@ -53,11 +58,10 @@ class SettingsStore(context: Context) {
             .putBoolean("shake", s.shakeToSave)
             .putBoolean("volumeCombo", s.volumeCombo)
             .putBoolean("autoExport", s.autoExport)
-            .putBoolean("rawMic", s.rawMic)
-            .putBoolean("denoise", s.denoise)
+            .putString("micMode", s.micMode.name)
             .putBoolean("voiceBoost", s.voiceBoost)
-            .putBoolean("echoCancel", s.echoCancel)
-            .putBoolean("indicator", s.indicator)
+            .putString("sttLang", s.sttLang)
+            .putBoolean("sttOnline", s.sttOnline)
             .putBoolean("autoRearm", s.autoRearm)
             .apply()
         _flow.value = s

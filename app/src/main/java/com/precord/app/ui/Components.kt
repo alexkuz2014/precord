@@ -93,18 +93,26 @@ fun Pill(text: String, selected: Boolean, modifier: Modifier = Modifier, enabled
 
 /** Flat rectangular button. [filled] = inverted. */
 @Composable
-fun KeyButton(text: String, modifier: Modifier = Modifier, enabled: Boolean = true, filled: Boolean = false, onClick: () -> Unit) {
+fun KeyButton(
+    text: String,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    filled: Boolean = false,
+    danger: Boolean = false,
+    onClick: () -> Unit,
+) {
     val click = rememberClick()
+    val accent = if (danger) PC.Danger else PC.Ink
     val fg = when {
         !enabled -> PC.Faint
         filled -> PC.Black
-        else -> PC.Ink
+        else -> accent
     }
     Box(
         modifier
             .height(48.dp)
-            .background(if (filled && enabled) PC.Ink else PC.Black)
-            .border(1.dp, if (enabled) (if (filled) PC.Ink else PC.Dim) else PC.Line)
+            .background(if (filled && enabled) accent else PC.Black)
+            .border(1.dp, if (enabled) (if (filled || danger) accent else PC.Dim) else PC.Line)
             .clickable(enabled = enabled, role = Role.Button) { click(); onClick() }
             .padding(horizontal = 16.dp),
         contentAlignment = Alignment.Center,
@@ -220,3 +228,23 @@ fun SectionTitle(text: String, modifier: Modifier = Modifier) {
 
 @Composable
 fun Gap(w: Int = 0, h: Int = 0) = androidx.compose.foundation.layout.Spacer(Modifier.width(w.dp).height(h.dp))
+
+/**
+ * Standard confirmation dialog: Cancel on the left (neutral outline), the confirming action on the
+ * right (filled; red when [destructive]). Back / outside tap = cancel.
+ */
+@Composable
+fun ConfirmDialog(title: String, message: String, confirm: String, destructive: Boolean, onDismiss: () -> Unit, onConfirm: () -> Unit) {
+    androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss) {
+        androidx.compose.foundation.layout.Column(
+            Modifier.fillMaxWidth().background(PC.Graphite).border(1.dp, if (destructive) PC.Danger else PC.Line).padding(20.dp),
+        ) {
+            Text(title, style = body(PC.Ink, 18.sp, androidx.compose.ui.text.font.FontWeight.SemiBold))
+            Text(message, style = body(PC.Dim, 14.sp), modifier = Modifier.padding(top = 8.dp, bottom = 20.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                KeyButton(androidx.compose.ui.res.stringResource(com.precord.app.R.string.cancel), Modifier.weight(1f), onClick = onDismiss)
+                KeyButton(confirm, Modifier.weight(1f), filled = true, danger = destructive) { onConfirm() }
+            }
+        }
+    }
+}
