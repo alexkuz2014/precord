@@ -15,13 +15,14 @@ AudioRecord ─PCM16─▶ Rust engine ─▶ gain / noise-gate ─▶ meters + 
 |---|---|
 | `ring.rs` | Single-producer circular buffer of `i16`. Absolute 64-bit positions, `claimed`/`write_pos` seqlock. Readers copy then verify they were not overtaken; overtaken snapshots are rejected, never saved corrupted. Capacity = window + 2 s slack. Storage via `alloc_zeroed` so untouched pages cost no RAM. |
 | `engine.rs` | `Engine::process` (audio thread, allocation-free): gain, noise gate (envelope follower, 4 ms attack / 60 ms release, -30 dB floor), 20 ms RMS/peak windows, 160-point scope. `plan` computes the snapshot range and normalisation gain (-1 dBFS target, max +30 dB). `save_wav` streams to disk without a second copy of the buffer. |
+| `aec.rs` | Reference-based echo canceller for *Remove phone audio*: envelope cross-correlation finds the bulk delay (re-checked every 0.5 s), a 24 ms NLMS filter subtracts the playback; adaptation freezes on near-end speech. |
 | `wav.rs` | PCM16 header read/write, waveform peaks, lossless trim. |
 | `jni_bridge.rs` | `extern "system"` functions for `com.precord.app.core.NativeBridge`. Never throws; returns status codes. Hot paths use stack buffers (no per-call heap allocation). |
 
 17 unit tests: wrap-around, overwrite rejection, a concurrent producer/reader torn-read test, gate, normalisation, WAV round trips, trim.
 
 ### DSP chain (per sample, `Engine::process`)
-`90 Hz high-pass (optional) → presence peaking EQ (voice) → noise gate → user gain → AGC (voice, frozen below −48 dB floor) → soft limiter → ring buffer`. Platform effects (NoiseSuppressor, AcousticEchoCanceler, VOICE_COMMUNICATION source) are attached in `PrecordService.attachEffects`.
+`playback subtraction (aec.rs, when a reference is supplied) → 90 Hz high-pass (optional) → presence peaking EQ (voice) → noise gate → user gain → AGC (voice, frozen below −48 dB floor) → soft limiter → ring buffer`. The platform NoiseSuppressor is attached in `PrecordService.attachEffects`; the playback reference comes from a second `AudioRecord` (AudioPlaybackCapture via MediaProjection) read in lock-step with the microphone.
 
 ## Android (`app/`)
 

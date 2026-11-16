@@ -19,6 +19,10 @@ data class MonitorState(
     val peak: Float = 0f,
     val scope: FloatArray = FloatArray(SCOPE_POINTS),
     val saving: Boolean = false,
+    /** Playback-subtraction mode is selected but Android's capture consent has not been given (yet). */
+    val needsCapture: Boolean = false,
+    /** Device playback is being captured and subtracted right now. */
+    val cancelling: Boolean = false,
     val errorRes: Int? = null,
     val errorArg: String? = null,
 )

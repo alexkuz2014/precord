@@ -64,6 +64,30 @@ pub extern "system" fn Java_com_precord_app_core_NativeBridge_nativeWrite(
     }
 }
 
+/// Microphone block + the device playback captured for the same block (echo reference).
+#[no_mangle]
+pub extern "system" fn Java_com_precord_app_core_NativeBridge_nativeWriteRef(
+    env: JNIEnv,
+    _this: JObject,
+    handle: jlong,
+    pcm: JShortArray,
+    reference: JShortArray,
+    len: jint,
+) {
+    let Some(e) = engine(handle) else { return };
+    let mut a = [0i16; 2048];
+    let mut b = [0i16; 2048];
+    let mut off = 0i32;
+    while off < len {
+        let n = (len - off).min(a.len() as i32) as usize;
+        if env.get_short_array_region(&pcm, off, &mut a[..n]).is_err() || env.get_short_array_region(&reference, off, &mut b[..n]).is_err() {
+            return;
+        }
+        e.process_with_ref(&a[..n], &b[..n]);
+        off += n as i32;
+    }
+}
+
 #[no_mangle]
 pub extern "system" fn Java_com_precord_app_core_NativeBridge_nativeSetDsp(
     _env: JNIEnv,

@@ -13,6 +13,9 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -61,7 +64,12 @@ private val PRESETS = listOf(30, 60, 300, 900, 1800, 3600)
 /** Custom buffer lengths: 10 s steps up to 5 min, then 1 min steps up to 2 h. */
 val CUSTOM_STEPS: List<Int> = (10..300 step 10).toList() + (6..120).map { it * 60 }
 
-/** Phones: one column. Tablets / landscape (>= 720 dp wide): meters left, controls right. */
+/**
+ * The deck never needs scrolling on a normal phone: the scope and the SAVE key are flexible
+ * (weights) and the ring is sized from the available height. Only very short windows
+ * (landscape phones, split-screen) fall back to a scrolling column with fixed sizes.
+ * Tablets / wide windows (>= 720 dp) use two columns.
+ */
 @Composable
 fun DeckScreen(
     state: MonitorState,
@@ -69,24 +77,38 @@ fun DeckScreen(
     onArmToggle: () -> Unit,
     onSave: (lastMs: Long?) -> Unit,
     onBufferSec: (Int) -> Unit,
+    onAllowCapture: () -> Unit,
 ) {
     var showCustom by remember { mutableStateOf(false) }
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val wide = maxWidth >= 720.dp
-        val ring = if (wide) 200.dp else minOf(172.dp, maxWidth * 0.46f)
+        val fit = maxHeight >= (if (wide) 330.dp else 430.dp)
+        val compact = maxHeight < 620.dp
+        val h = maxHeight
+        val ring = when {
+            !fit -> 150.dp
+            wide -> (h * 0.42f).coerceIn(96.dp, 220.dp)
+            else -> minOf((h * 0.23f).coerceIn(92.dp, 184.dp), maxWidth * 0.46f)
+        }
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
             if (wide) {
                 Row(Modifier.widthIn(max = 1040.dp).fillMaxSize().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(32.dp)) {
-                    Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) { Meters(state, settings, ring) }
-                    Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(top = 12.dp, bottom = 24.dp)) {
-                        Controls(state, settings, onArmToggle, onSave, onBufferSec) { showCustom = true }
+                    Column(Modifier.weight(1f).fillMaxSize().then(if (fit) Modifier else Modifier.verticalScroll(rememberScrollState())).padding(bottom = 12.dp)) {
+                        Meters(state, settings, ring, fit, compact, onAllowCapture)
+                    }
+                    Column(Modifier.weight(1f).fillMaxSize().then(if (fit) Modifier else Modifier.verticalScroll(rememberScrollState())).padding(top = 12.dp, bottom = 12.dp)) {
+                        Controls(state, settings, fit, compact, onArmToggle, onSave, onBufferSec) { showCustom = true }
                     }
                 }
             } else {
-                Column(Modifier.widthIn(max = 600.dp).fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp).padding(bottom = 24.dp)) {
-                    Meters(state, settings, ring)
-                    Gap(h = 24)
-                    Controls(state, settings, onArmToggle, onSave, onBufferSec) { showCustom = true }
+                Column(
+                    Modifier.widthIn(max = 600.dp).fillMaxSize()
+                        .then(if (fit) Modifier else Modifier.verticalScroll(rememberScrollState()))
+                        .padding(horizontal = 16.dp).padding(bottom = 12.dp),
+                ) {
+                    Meters(state, settings, ring, fit, compact, onAllowCapture)
+                    Gap(h = if (compact) 10 else 16)
+                    Controls(state, settings, fit, compact, onArmToggle, onSave, onBufferSec) { showCustom = true }
                 }
             }
         }
@@ -95,81 +117,96 @@ fun DeckScreen(
 }
 
 @Composable
-private fun Meters(state: MonitorState, settings: PrecordSettings, ringSize: Dp) {
+private fun ColumnScope.Meters(state: MonitorState, settings: PrecordSettings, ringSize: Dp, fit: Boolean, compact: Boolean, onAllowCapture: () -> Unit) {
     val armed = state.running
-    Row(Modifier.fillMaxWidth().padding(top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.fillMaxWidth().padding(top = 10.dp), verticalAlignment = Alignment.CenterVertically) {
         LedDot(armed)
         Gap(8)
         Label(stringResource(if (armed) R.string.status_armed else R.string.status_standby), color = if (armed) PC.Ink else PC.Dim)
         androidx.compose.foundation.layout.Spacer(Modifier.weight(1f))
-        Text("${Fmt.rate(settings.sampleRate)} ${settings.format.label}", style = mono(11.sp, PC.Dim))
+        Text(
+            if (state.cancelling) stringResource(R.string.capture_on) else "${Fmt.rate(settings.sampleRate)} ${settings.format.label}",
+            style = mono(11.sp, if (state.cancelling) PC.Ink else PC.Dim),
+        )
     }
     state.errorRes?.let {
-        Text(stringResource(it, state.errorArg ?: ""), style = body(PC.Ink, 13.sp), modifier = Modifier.padding(top = 8.dp).fillMaxWidth().border(1.dp, PC.Signal).padding(10.dp))
+        Text(stringResource(it, state.errorArg ?: ""), style = body(PC.Ink, 13.sp), modifier = Modifier.padding(top = 8.dp).fillMaxWidth().border(1.dp, PC.Danger).padding(10.dp))
     }
-    Gap(h = 12)
-    ScopeView(state.scope, armed, Modifier.fillMaxWidth().height(110.dp))
+    if (state.needsCapture) {
+        Row(Modifier.padding(top = 8.dp).fillMaxWidth().border(1.dp, PC.Dim).padding(start = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(stringResource(R.string.capture_needed), style = body(PC.Ink, 12.sp), modifier = Modifier.weight(1f).padding(vertical = 6.dp))
+            KeyButton(stringResource(R.string.capture_allow), filled = true, onClick = onAllowCapture)
+        }
+    }
+    Gap(h = 10)
+    ScopeView(state.scope, armed, if (fit) Modifier.fillMaxWidth().weight(1f).heightIn(min = 36.dp) else Modifier.fillMaxWidth().height(110.dp))
     Gap(h = 8)
     VuMeter(state.rms, state.peak, armed)
 
-    Gap(h = 20)
-    Hairline()
-    Gap(h = 20)
+    Gap(h = if (compact) 10 else 16)
     Row(verticalAlignment = Alignment.CenterVertically) {
         val windowMs = if (armed) state.windowMs else settings.windowMs
         val frac = if (windowMs > 0) (state.bufferedMs.toFloat() / windowMs).coerceIn(0f, 1f) else 0f
         BufferRing(frac, armed, Fmt.clock(state.bufferedMs), "/ ${Fmt.clock(windowMs)}", Modifier.size(ringSize))
         Gap(20)
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(if (compact) 6.dp else 12.dp)) {
             Readout(stringResource(R.string.fill), "${(frac * 100).toInt()}%")
             Readout(stringResource(R.string.ram), Fmt.bytes(settings.ramBytes))
-            Readout(stringResource(R.string.format), "${settings.format.label} ${Fmt.rate(settings.sampleRate)}")
+            if (ringSize >= 130.dp) Readout(stringResource(R.string.format), "${settings.format.label} ${Fmt.rate(settings.sampleRate)}")
         }
     }
 }
 
 @Composable
-private fun Controls(
+private fun ColumnScope.Controls(
     state: MonitorState,
     settings: PrecordSettings,
+    fit: Boolean,
+    compact: Boolean,
     onArmToggle: () -> Unit,
     onSave: (Long?) -> Unit,
     onBufferSec: (Int) -> Unit,
     onCustom: () -> Unit,
 ) {
     val armed = state.running
-    Label(stringResource(R.string.buffer_length))
-    Gap(h = 8)
+    var confirmStop by remember { mutableStateOf(false) }
     Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         PRESETS.forEach { sec -> Pill(Fmt.duration(sec), settings.bufferSec == sec) { onBufferSec(sec) } }
         val custom = settings.bufferSec !in PRESETS
         Pill(if (custom) Fmt.duration(settings.bufferSec) else stringResource(R.string.custom), custom, onClick = onCustom)
     }
-    Gap(h = 8)
-    Text(Fmt.ramLine(settings), style = mono(12.sp, PC.Dim))
-    if (settings.ramBytes > 200_000_000L) {
-        Text(stringResource(R.string.ram_heavy), style = body(PC.Dim, 12.sp), modifier = Modifier.padding(top = 2.dp))
-    }
-    if (armed) Text(stringResource(R.string.restart_note), style = body(PC.Faint, 12.sp), modifier = Modifier.padding(top = 2.dp))
+    Text(
+        if (settings.ramBytes > 200_000_000L) stringResource(R.string.ram_heavy) else Fmt.ramLine(settings),
+        style = mono(11.sp, PC.Dim), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 6.dp),
+    )
 
-    Gap(h = 24)
+    Gap(h = if (compact) 10 else 16)
     val canSave = armed && state.bufferedMs > 500 && !state.saving
     SaveKey(
         enabled = canSave,
         busy = state.saving,
+        compact = compact,
         caption = if (armed) stringResource(R.string.last_x, Fmt.clock(state.bufferedMs)) else stringResource(R.string.arm_first),
+        modifier = if (fit) Modifier.fillMaxWidth().weight(1.15f).heightIn(min = 64.dp, max = 170.dp) else Modifier.fillMaxWidth().height(120.dp),
     ) { onSave(null) }
 
-    Gap(h = 16)
-    val quick = listOf(30, 60, 300).filter { it < settings.bufferSec }
-    if (quick.isNotEmpty()) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Label(stringResource(R.string.save_last))
-            quick.forEach { sec -> KeyButton(Fmt.duration(sec), enabled = canSave) { onSave(sec * 1000L) } }
+    Gap(h = if (compact) 8 else 12)
+    // one row: quick "save last N" keys + the arm switch
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+        listOf(30, 60, 300).filter { it < settings.bufferSec }.forEach { sec ->
+            KeyButton(Fmt.duration(sec), enabled = canSave) { onSave(sec * 1000L) }
         }
-        Gap(h = 12)
+        KeyButton(stringResource(if (armed) R.string.stop_buffer else R.string.arm_buffer), Modifier.weight(1f), filled = !armed, danger = armed) {
+            // stopping throws the buffered audio away - ask once there is something to lose
+            if (armed && state.bufferedMs > 10_000) confirmStop = true else onArmToggle()
+        }
     }
-    KeyButton(stringResource(if (armed) R.string.stop_buffer else R.string.arm_buffer), Modifier.fillMaxWidth(), filled = !armed, onClick = onArmToggle)
+    if (confirmStop) {
+        ConfirmDialog(
+            stringResource(R.string.confirm_stop_title), stringResource(R.string.confirm_stop_msg, Fmt.clock(state.bufferedMs)),
+            stringResource(R.string.stop_buffer), destructive = true, onDismiss = { confirmStop = false },
+        ) { confirmStop = false; onArmToggle() }
+    }
 }
 
 @Composable
@@ -194,7 +231,8 @@ fun ScopeView(points: FloatArray, active: Boolean, modifier: Modifier = Modifier
             val a = Math.pow(points[i].coerceIn(0f, 1f).toDouble(), 0.55).toFloat() // lift quiet detail
             val h = max(a * (size.height / 2 - 4.dp.toPx()), 1.dp.toPx())
             val x = step * i + step / 2
-            drawLine(color, Offset(x, mid - h), Offset(x, mid + h), strokeWidth = (step * 0.62f).coerceAtLeast(1f), cap = StrokeCap.Butt)
+            // older samples fade out towards the left edge
+            drawLine(color.copy(alpha = 0.25f + 0.75f * i / n), Offset(x, mid - h), Offset(x, mid + h), strokeWidth = (step * 0.62f).coerceAtLeast(1f), cap = StrokeCap.Butt)
         }
     }
 }
@@ -250,7 +288,11 @@ fun BufferRing(fraction: Float, armed: Boolean, big: String, small: String, modi
                 val a = (-90.0 + 360.0 * i / ticks) * Math.PI / 180.0
                 val major = i % 6 == 0
                 val r0 = if (major) inner - 4.dp.toPx() else inner
-                val col = if (i < lit) (if (armed) PC.Signal else PC.Dim) else PC.Line
+                val col = when {
+                    armed && i == lit && lit < ticks -> PC.Ink // write head
+                    i < lit -> if (armed) PC.Signal else PC.Dim
+                    else -> PC.Line
+                }
                 drawLine(
                     col,
                     Offset(c.x + (r0 * cos(a)).toFloat(), c.y + (r0 * sin(a)).toFloat()),
@@ -269,18 +311,18 @@ fun BufferRing(fraction: Float, armed: Boolean, big: String, small: String, modi
 
 /** The big orange SAVE REPLAY key: flat base plate + cap that physically sinks when pressed. */
 @Composable
-fun SaveKey(enabled: Boolean, busy: Boolean, caption: String, onSave: () -> Unit) {
+fun SaveKey(enabled: Boolean, busy: Boolean, compact: Boolean, caption: String, modifier: Modifier = Modifier, onSave: () -> Unit) {
     val src = remember { MutableInteractionSource() }
     val pressed by src.collectIsPressedAsState()
     val travel by animateDpAsState(if (pressed && enabled) 7.dp else 0.dp, label = "keyTravel")
     val view = LocalView.current
     val title = stringResource(if (busy) R.string.saving else R.string.save_replay)
-    Box(Modifier.fillMaxWidth().height(134.dp)) {
-        Box(Modifier.fillMaxWidth().height(127.dp).offset(y = 7.dp).background(if (enabled) PC.SignalDeep else PC.Graphite))
+    Box(modifier) {
+        Box(Modifier.fillMaxSize().padding(top = 7.dp).background(if (enabled) PC.SignalDeep else PC.Graphite))
         Box(
             Modifier
-                .fillMaxWidth()
-                .height(127.dp)
+                .fillMaxSize()
+                .padding(bottom = 7.dp)
                 .offset(y = travel)
                 .background(if (enabled) PC.Signal else PC.Graphite2)
                 .clickable(interactionSource = src, indication = null, enabled = enabled, role = Role.Button) {
@@ -290,9 +332,9 @@ fun SaveKey(enabled: Boolean, busy: Boolean, caption: String, onSave: () -> Unit
             contentAlignment = Alignment.Center,
         ) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(title, style = mono(30.sp, if (enabled) PC.Black else PC.Faint, FontWeight.Bold), textAlign = TextAlign.Center)
-                Gap(h = 6)
-                Text(caption, style = mono(13.sp, if (enabled) PC.Black else PC.Faint))
+                Text(title, style = mono(if (compact) 24.sp else 30.sp, if (enabled) PC.Black else PC.Faint, FontWeight.Bold), textAlign = TextAlign.Center, maxLines = 1)
+                Gap(h = if (compact) 2 else 6)
+                Text(caption, style = mono(if (compact) 11.sp else 13.sp, if (enabled) PC.Black else PC.Faint), maxLines = 1)
             }
         }
     }

@@ -11,7 +11,8 @@
 * **Settings** (buffer length, sample rate, format, toggles) are stored locally.
 * **Accessibility service (GitHub APK only):** if you enable it, Precord receives only the Volume Up / Volume Down key events to detect the save combination. It does not read screen content and does not transmit anything. The Google Play version does not include this service.
 * **Transcripts** are produced by Android's on-device speech recognizer on your phone; audio is not sent anywhere by Precord.
-* **Display over other apps** (optional *Recording bubble*): used only to draw the small indicator; no screen content is read.
+* **Remove phone audio** mode (optional): Android's capture permission is used only to receive the audio this phone is playing, so it can be subtracted from the microphone signal. The screen is never captured and the captured audio is not stored or sent anywhere.
+* **Online recognition** (optional, off by default): if you enable it, the clip's audio is sent to your phone's speech service (e.g. Google) for transcription.
 * No analytics, advertising, tracking or third-party SDKs are used.
 * Uninstalling the app deletes its private data; exported copies in `Recordings/Precord` stay until you delete them.
 * You are responsible for recording only where the law and the consent of the people involved allow it.
@@ -27,7 +28,8 @@ Contact: open an issue at https://github.com/mantisfett/precord/issues
 * **Настройки** хранятся локально.
 * **Служба доступности (только APK с GitHub):** если вы её включите, Precord получает лишь нажатия кнопок громкости для распознавания комбинации. Содержимое экрана не читается, ничего не передаётся. В версии для Google Play этой службы нет.
 * **Расшифровка** выполняется системным распознавателем речи на вашем телефоне; Precord звук никуда не отправляет.
-* **Поверх других окон** (необязательный «пузырь записи») используется только для рисования маленького индикатора; содержимое экрана не читается.
+* **Режим «Убрать звук телефона»** (необязательный): разрешение Android на захват используется только чтобы получить звук, который играет телефон, и вычесть его из сигнала микрофона. Экран не захватывается, захваченный звук не сохраняется и никуда не отправляется.
+* **Онлайн-распознавание** (необязательное, по умолчанию выключено): если его включить, звук записи отправляется в службу распознавания телефона (например, Google).
 * Нет аналитики, рекламы, трекинга и сторонних SDK.
 * При удалении приложения его данные удаляются; экспортированные копии в `Recordings/Precord` остаются до ручного удаления.
 * Вы отвечаете за то, чтобы записывать только там, где это допускают закон и согласие участников.
@@ -43,7 +45,8 @@ Contact: open an issue at https://github.com/mantisfett/precord/issues
 * **Налаштування** зберігаються локально.
 * **Служба доступності (лише APK з GitHub):** якщо ви її ввімкнете, Precord отримує лише натискання кнопок гучності для розпізнавання комбінації. Вміст екрана не зчитується, нічого не передається. У версії для Google Play цієї служби немає.
 * **Розшифрування** виконує системний розпізнавач мовлення на вашому телефоні; Precord звук нікуди не надсилає.
-* **Поверх інших вікон** (необов’язкова «бульбашка запису») використовується лише для малювання невеликого індикатора; вміст екрана не зчитується.
+* **Режим «Прибрати звук телефона»** (необов’язковий): дозвіл Android на захоплення використовується лише щоб отримати звук, який грає телефон, і відняти його від сигналу мікрофона. Екран не захоплюється, захоплений звук не зберігається й нікуди не надсилається.
+* **Онлайн-розпізнавання** (необов’язкове, типово вимкнене): якщо його ввімкнути, звук запису надсилається до служби розпізнавання телефона (наприклад, Google).
 * Немає аналітики, реклами, трекінгу та сторонніх SDK.
 * Після видалення застосунку його дані видаляються; експортовані копії в `Recordings/Precord` лишаються до ручного видалення.
 * Ви відповідаєте за те, щоб записувати лише там, де це дозволяють закон і згода учасників.

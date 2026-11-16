@@ -15,8 +15,15 @@ import android.media.AudioFormat
 import android.media.AudioManager
 import android.media.AudioRecord
 import android.media.MediaRecorder
-import android.media.audiofx.AcousticEchoCanceler
+import android.media.AudioAttributes
+import android.media.AudioPlaybackCaptureConfiguration
+import android.media.projection.MediaProjection
+import android.media.projection.MediaProjectionManager
+import android.os.Handler
+import android.os.Looper
+import com.precord.app.core.MicMode
 import android.media.audiofx.NoiseSuppressor
+import android.os.Bundle
 import android.os.IBinder
 import android.os.PowerManager
 import android.os.Process
@@ -59,8 +66,8 @@ class PrecordService : Service() {
     private var record: AudioRecord? = null
     private var captureThread: Thread? = null
     @Volatile private var capturing = false
-    private data class CaptureKey(val bufferSec: Int, val rate: Int, val raw: Boolean, val denoise: Boolean, val echo: Boolean)
-    private fun keyOf(s: PrecordSettings) = CaptureKey(s.bufferSec, s.sampleRate, s.rawMic, s.denoise, s.echoCancel)
+    private data class CaptureKey(val bufferSec: Int, val rate: Int, val mode: MicMode, val withRef: Boolean)
+    private fun keyOf(s: PrecordSettings) = CaptureKey(s.bufferSec, s.sampleRate, s.micMode, s.micMode == MicMode.PLAYBACK && projection != null)
 
     private var captureKey: CaptureKey? = null // capture configuration currently running
 
@@ -70,7 +77,8 @@ class PrecordService : Service() {
     private var shake: ShakeDetector? = null
     private var foregrounded = false
     private var lastNote: String? = null
-    private var overlay: OverlayIndicator? = null
+    private var projection: MediaProjection? = null
+    private var refRecord: AudioRecord? = null
     private val effects = mutableListOf<android.media.audiofx.AudioEffect>()
     private var restarts = 0
 
@@ -79,13 +87,12 @@ class PrecordService : Service() {
     override fun onCreate() {
         super.onCreate()
         createChannels()
-        overlay = OverlayIndicator(this)
         shake = ShakeDetector(getSystemService(Context.SENSOR_SERVICE) as SensorManager) { saveReplay(null) }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
-            ServiceController.ACTION_START, null -> startMonitoring()
+            ServiceController.ACTION_START, null -> startMonitoring(intent)
             ServiceController.ACTION_STOP -> stopMonitoring()
             ServiceController.ACTION_SAVE -> {
                 if (engine == null) {
@@ -101,20 +108,42 @@ class PrecordService : Service() {
 
     // ---------------------------------------------------------------- lifecycle
 
-    private fun startMonitoring() {
+    private fun startMonitoring(intent: Intent?) {
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             Monitor.update { it.copy(running = false, errorRes = R.string.err_permission, errorArg = null) }
             stopSelf()
             return
         }
-        if (!foregrounded) {
+        @Suppress("DEPRECATION")
+        val projData: Intent? = intent?.getParcelableExtra(ServiceController.EXTRA_PROJ_DATA)
+        if (!foregrounded || projData != null) {
             try {
-                startForeground(NOTIF_ID, buildNotification(0, 1, precord.settings.value), ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
+                // The mediaProjection type may only be requested once the user accepted the capture dialog.
+                val types = ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE or
+                    (if (projData != null || projection != null) ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION else 0)
+                startForeground(NOTIF_ID, buildNotification(0, 1, precord.settings.value), types)
                 foregrounded = true
             } catch (e: Exception) { // e.g. ForegroundServiceStartNotAllowedException when started from the background
                 Monitor.update { it.copy(running = false, errorRes = R.string.err_background, errorArg = null) }
                 stopSelf()
                 return
+            }
+        }
+        if (projData != null) {
+            runCatching {
+                val mgr = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+                projection?.stop()
+                projection = mgr.getMediaProjection(intent.getIntExtra(ServiceController.EXTRA_PROJ_CODE, 0), projData)?.also {
+                    it.registerCallback(object : MediaProjection.Callback() {
+                        override fun onStop() {
+                            // User ended the capture from the system chip: keep buffering, just without subtraction.
+                            if (projection != null) {
+                                projection = null
+                                scope.launch { if (engine != null && !beginCapture(precord.settings.value)) stopMonitoring() }
+                            }
+                        }
+                    }, Handler(Looper.getMainLooper()))
+                }
             }
         }
         if (!beginCapture(precord.settings.value)) {
@@ -133,11 +162,12 @@ class PrecordService : Service() {
 
     private fun stopMonitoring() {
         precord.settings.wasArmed = false
-        overlay?.hide()
         ticker?.cancel()
         settingsJob?.cancel()
         setScreenOffTriggers(false)
         endCapture()
+        projection?.let { p -> projection = null; runCatching { p.stop() } }
+        Monitor.update { it.copy(needsCapture = false, cancelling = false) }
         Monitor.update { it.copy(running = false, bufferedMs = 0, rms = 0f, peak = 0f, scope = FloatArray(SCOPE_POINTS), errorRes = null) }
         if (foregrounded) {
             stopForeground(STOP_FOREGROUND_REMOVE)
@@ -152,7 +182,7 @@ class PrecordService : Service() {
     }
 
     override fun onDestroy() {
-        overlay?.hide()
+        projection?.let { p -> projection = null; runCatching { p.stop() } }
         ticker?.cancel()
         settingsJob?.cancel()
         shake?.stop()
@@ -203,14 +233,31 @@ class PrecordService : Service() {
         engine = eng
         record = rec
         captureKey = keyOf(s)
+        val ref = if (s.micMode == MicMode.PLAYBACK) openPlaybackCapture(s) else null
+        refRecord = ref
+        Monitor.update { it.copy(needsCapture = s.micMode == MicMode.PLAYBACK && ref == null, cancelling = ref != null) }
         capturing = true
         rec.startRecording()
+        ref?.startRecording()
         captureThread = Thread({
             Process.setThreadPriority(Process.THREAD_PRIORITY_URGENT_AUDIO)
             val buf = ShortArray(block)
+            val refBuf = ShortArray(block)
+            var refOk = ref != null
             while (capturing) {
                 val n = rec.read(buf, 0, buf.size)
-                if (n > 0) eng.write(buf, n) else if (n < 0) break
+                if (n < 0) break
+                if (n == 0) continue
+                if (refOk) {
+                    // Read the same number of playback samples so both streams stay sample-locked.
+                    var got = 0
+                    while (got < n) {
+                        val r = ref!!.read(refBuf, got, n - got)
+                        if (r <= 0) { refOk = false; break }
+                        got += r
+                    }
+                }
+                if (refOk) eng.writeRef(buf, refBuf, n) else eng.write(buf, n)
             }
             if (capturing && engine === eng) {
                 // Read error (mic taken by the system / device switch): re-open the microphone instead of going deaf.
@@ -228,22 +275,40 @@ class PrecordService : Service() {
 
     /** Platform noise suppressor / echo canceller (present on most, not all, phones). */
     private fun attachEffects(rec: AudioRecord, s: PrecordSettings) {
+        if (s.micMode != MicMode.DENOISE) return
         runCatching {
-            if (s.denoise && NoiseSuppressor.isAvailable()) NoiseSuppressor.create(rec.audioSessionId)?.also { it.enabled = true; effects += it }
-            if (s.echoCancel && AcousticEchoCanceler.isAvailable()) AcousticEchoCanceler.create(rec.audioSessionId)?.also { it.enabled = true; effects += it }
+            if (NoiseSuppressor.isAvailable()) NoiseSuppressor.create(rec.audioSessionId)?.also { it.enabled = true; effects += it }
         }
     }
 
-    /** UNPROCESSED bypasses AGC / noise suppression where the device supports it. */
+    /** UNPROCESSED bypasses the phone's AGC / noise suppression where the device supports it. */
     private fun audioSource(s: PrecordSettings): Int {
-        // Call-mode source: the platform echo canceller gets the phone's own playback as reference,
-        // which is what removes a video/music playing on this device from the recording.
-        if (s.echoCancel) return MediaRecorder.AudioSource.VOICE_COMMUNICATION
-        if (s.rawMic) {
+        if (s.micMode == MicMode.RAW) {
             val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
             if (am.getProperty(AudioManager.PROPERTY_SUPPORT_AUDIO_SOURCE_UNPROCESSED) == "true") return MediaRecorder.AudioSource.UNPROCESSED
         }
         return MediaRecorder.AudioSource.MIC
+    }
+
+    /**
+     * Second recorder that receives exactly what the phone is playing (media / games), at the mic's
+     * sample rate. Rust uses it as the reference to subtract from the microphone.
+     */
+    private fun openPlaybackCapture(s: PrecordSettings): AudioRecord? {
+        val p = projection ?: return null
+        return runCatching {
+            val cfg = AudioPlaybackCaptureConfiguration.Builder(p)
+                .addMatchingUsage(AudioAttributes.USAGE_MEDIA)
+                .addMatchingUsage(AudioAttributes.USAGE_GAME)
+                .addMatchingUsage(AudioAttributes.USAGE_UNKNOWN)
+                .build()
+            val fmt = AudioFormat.Builder().setEncoding(AudioFormat.ENCODING_PCM_16BIT).setSampleRate(s.sampleRate)
+                .setChannelMask(AudioFormat.CHANNEL_IN_MONO).build()
+            val min = AudioRecord.getMinBufferSize(s.sampleRate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
+            AudioRecord.Builder().setAudioPlaybackCaptureConfig(cfg).setAudioFormat(fmt)
+                .setBufferSizeInBytes(maxOf(min * 2, s.sampleRate / 25 * 2 * 8)).build()
+                .takeIf { it.state == AudioRecord.STATE_INITIALIZED }
+        }.getOrNull()
     }
 
     private fun endCapture() = synchronized(captureLock) {
@@ -251,6 +316,9 @@ class PrecordService : Service() {
         runCatching { record?.stop() }
         captureThread?.join(1000)
         captureThread = null
+        runCatching { refRecord?.stop() }
+        refRecord?.release()
+        refRecord = null
         effects.forEach { runCatching { it.release() } }
         effects.clear()
         record?.release()
@@ -264,7 +332,6 @@ class PrecordService : Service() {
         val eng = engine ?: return
         eng.setDsp(s)
         setScreenOffTriggers(s.shakeToSave)
-        if (s.indicator && overlay?.canShow() == true) overlay?.show() else overlay?.hide()
         if (captureKey != keyOf(s)) {
             // Different buffer length / sample rate needs a fresh ring (the old audio cannot be reinterpreted).
             if (!beginCapture(s)) stopMonitoring()
@@ -307,7 +374,6 @@ class PrecordService : Service() {
                 }
                 if (n % (if (visible) 25 else 5) == 0) {
                     updateNotification(buffered, eng.windowMs)
-                    overlay?.update(Fmt.clock(buffered))
                 }
             }
             n++
@@ -381,10 +447,14 @@ class PrecordService : Service() {
             .setOnlyAlertOnce(true)
             .setSilent(true)
             .setShowWhen(false)
-            .setColor(0xFFFF3B00.toInt())
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setContentIntent(open)
+            // Android 16+: "Live Update" - the system shows a chip with this text in the status bar.
+            .addExtras(Bundle().apply {
+                putBoolean("android.requestPromotedOngoing", true)
+                putCharSequence("android.shortCriticalText", Fmt.clock(bufferedMs))
+            })
             .addAction(action(1, getString(R.string.action_save), ServiceController.ACTION_SAVE))
             .addAction(action(2, getString(R.string.action_stop), ServiceController.ACTION_STOP))
             .build()

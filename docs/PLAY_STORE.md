@@ -37,7 +37,8 @@ Texts in [play/listing-en.md](play/listing-en.md), [ru](play/listing-ru.md), [uk
 | **Foreground service: microphone** (`FOREGROUND_SERVICE_MICROPHONE`) | Declaration form (Policy → App content → *Foreground service permissions*). Use case: *"User-initiated, ongoing audio capture into a replay buffer while the user has armed it; a persistent notification with Save/Stop is shown."* Provide a short demo video (arm → notification → save → clip in library). |
 | `POST_NOTIFICATIONS` | Required to show the foreground-service notification (Android 13+). |
 | `VIBRATE`, `WAKE_LOCK` | Haptic confirmation; wake lock only while *Shake to save* is on. |
-| `SYSTEM_ALERT_WINDOW` | Optional *Recording bubble* (user-enabled, off by default): small indicator that shows the app is recording and saves on tap. Sensitive permission - explain in the review notes; if review pushes back, remove the permission and the `indicator` setting. |
+| **Foreground service: mediaProjection** (`FOREGROUND_SERVICE_MEDIA_PROJECTION`) | Used only by the optional *Remove phone audio* mode: audio-only playback capture (no screen recording) as the echo reference. Declare it in the same FGS form with a demo video; the user sees Android's capture consent each time. |
+| `POST_PROMOTED_NOTIFICATIONS` | Android 16 Live Update chip for the ongoing buffer notification. |
 | Speech recognition | Transcription uses Android's on-device `SpeechRecognizer` (no extra permission beyond `RECORD_AUDIO`, no network). |
 | Accessibility API | **Not used in the `play` flavor.** Do not ship the `full` flavor to Play: Google restricts the Accessibility API to accessibility tools. |
 | Photo/video/all-files access | Not used (MediaStore insert into `Recordings/` needs no permission on API 29+). |
