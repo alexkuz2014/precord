@@ -8,7 +8,9 @@
 //! talking), so the user's voice is not cancelled or smeared.
 
 const MAX_DELAY_MS: usize = 600;
-const TAP_MS: usize = 24;
+/// Adaptive window: 64 ms, capped at 1536 taps (=32 ms at 48 kHz) to bound CPU use.
+const TAP_MS: usize = 64;
+const MAX_TAPS: usize = 1536;
 const ENV_LEN: usize = 1024; // 2 ms blocks -> ~2 s of history
 const MAX_LAG: usize = MAX_DELAY_MS / 2; // in envelope blocks
 const WINDOW: usize = 650; // blocks correlated per estimate
@@ -40,7 +42,7 @@ pub struct Aec {
 impl Aec {
     pub fn new(sample_rate: u32) -> Self {
         let sr = sample_rate as usize;
-        let taps = (sr * TAP_MS / 1000).max(64);
+        let taps = (sr * TAP_MS / 1000).clamp(64, MAX_TAPS);
         let n = sr * MAX_DELAY_MS / 1000 + taps + 8;
         Self {
             taps,
@@ -197,11 +199,29 @@ impl Aec {
         let margin = self.taps / 4;
         let target = (best.0 * self.blk).saturating_sub(margin).min(self.n - self.taps - 2);
         if !self.locked || target.abs_diff(self.delay) > margin / 2 + self.blk {
+            // Keep what the filter has learned: a delay change of `d` samples just moves the taps.
+            if self.locked {
+                let old = self.delay;
+                let mut moved = vec![0.0f32; self.taps];
+                if target >= old {
+                    let d = target - old; // echo now arrives `d` samples later relative to the window start
+                    for i in 0..self.taps.saturating_sub(d) {
+                        moved[i + d] = self.w[i];
+                    }
+                } else {
+                    let d = old - target;
+                    for i in d..self.taps {
+                        moved[i - d] = self.w[i];
+                    }
+                }
+                self.w = moved;
+            } else {
+                for wi in self.w.iter_mut() {
+                    *wi = 0.0;
+                }
+            }
             self.delay = target;
             self.locked = true;
-            for wi in self.w.iter_mut() {
-                *wi = 0.0;
-            }
             // re-seed window energy for the new alignment
             let end = self.pos + self.n - self.delay;
             self.px = self.hist[end - self.taps..end].iter().map(|v| v * v).sum();

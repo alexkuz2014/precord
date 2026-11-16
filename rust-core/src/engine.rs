@@ -77,6 +77,7 @@ impl Snapshot {
 }
 
 struct WriterState {
+    den: crate::denoise::Denoiser,
     aec: Option<crate::aec::Aec>,
     hp: Biquad,
     eq: Biquad,
@@ -149,6 +150,7 @@ impl Engine {
             gate_attack: 1.0 - (-1.0 / (srf * 0.004)).exp(),
             gate_release: 1.0 - (-1.0 / (srf * 0.060)).exp(),
             writer: Mutex::new(WriterState {
+                den: crate::denoise::Denoiser::new(),
                 aec: None,
                 hp: Biquad::highpass(srf, 90.0, 0.707),
                 eq: Biquad::peaking(srf, 2800.0, 0.9, 4.0),
@@ -216,6 +218,7 @@ impl Engine {
                 }
                 if hp_on {
                     x = st.hp.run(x);
+                    x = st.den.process(x); // spectral noise reduction (noise-reduction mode)
                 }
                 if voice {
                     x = st.eq.run(x);
@@ -490,8 +493,11 @@ mod tests {
         assert!(rms(&low[8000..]) < 0.1 * (0.5 / 2f32.sqrt()), "20 Hz not attenuated: {}", rms(&low[8000..]));
         let e = Engine::new(16000, 10_000).unwrap();
         e.set_dsp(0.0, false, -50.0, true, false);
-        let mid = render(&e, &tone(16000, 0.5, 1000.0, 16000.0));
-        let r = rms(&mid[8000..]) / (0.5 / 2f32.sqrt());
+        // noise reduction learns the floor from the start, so give it a quiet lead-in like a real recording
+        let mut inp = tone(8000, 0.002, 313.0, 16000.0);
+        inp.extend(tone(16000, 0.5, 1000.0, 16000.0));
+        let mid = render(&e, &inp);
+        let r = rms(&mid[16000..]) / (0.5 / 2f32.sqrt());
         assert!((0.9..1.1).contains(&r), "1 kHz changed by {r}");
     }
 
@@ -544,5 +550,29 @@ mod tests {
         let before = rms(&mic[sr * 5..]);
         let after = rms(&out[sr * 5..]);
         assert!(after < before * 0.15, "playback not removed: {after} vs {before}");
+    }
+
+    /// Real-time budget: playback removal + noise reduction + voice boost at 48 kHz must be far faster than real time.
+    #[test]
+    fn worst_case_chain_is_much_faster_than_realtime() {
+        let sr = 48000usize;
+        let n = sr * 5;
+        let mut seed = 9u32;
+        let sig: Vec<i16> = (0..n)
+            .map(|_| {
+                seed = seed.wrapping_mul(1664525).wrapping_add(1013904223);
+                ((seed >> 17) as i16) - 8192
+            })
+            .collect();
+        let e = Engine::new(sr as u32, 60_000).unwrap();
+        e.set_dsp(0.0, true, -50.0, true, true);
+        let t = std::time::Instant::now();
+        for (m, r) in sig.chunks(960).zip(sig.chunks(960)) {
+            e.process_with_ref(m, r);
+        }
+        let secs = t.elapsed().as_secs_f32();
+        eprintln!("5 s of 48 kHz audio processed in {secs:.3} s");
+        // debug builds are ~10x slower than release; even then the chain must keep up
+        assert!(secs < 5.0, "too slow for real time: {secs}");
     }
 }

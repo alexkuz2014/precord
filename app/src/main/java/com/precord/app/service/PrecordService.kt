@@ -77,8 +77,10 @@ class PrecordService : Service() {
     private var shake: ShakeDetector? = null
     private var foregrounded = false
     private var lastNote: String? = null
+    private var lastNoteAt = 0L
     private var projection: MediaProjection? = null
     private var refRecord: AudioRecord? = null
+    private var refThread: Thread? = null
     private val effects = mutableListOf<android.media.audiofx.AudioEffect>()
     private var restarts = 0
 
@@ -139,7 +141,7 @@ class PrecordService : Service() {
                             // User ended the capture from the system chip: keep buffering, just without subtraction.
                             if (projection != null) {
                                 projection = null
-                                scope.launch { if (engine != null && !beginCapture(precord.settings.value)) stopMonitoring() }
+                                scope.launch { if (engine != null && !beginCapture(precord.settings.value)) stopMonitoring(keepError = true) }
                             }
                         }
                     }, Handler(Looper.getMainLooper()))
@@ -147,7 +149,7 @@ class PrecordService : Service() {
             }
         }
         if (!beginCapture(precord.settings.value)) {
-            stopMonitoring()
+            stopMonitoring(keepError = true)
             return
         }
         precord.settings.wasArmed = true
@@ -160,7 +162,8 @@ class PrecordService : Service() {
         }
     }
 
-    private fun stopMonitoring() {
+    /** [keepError]: leave the failure reason on screen (start failed) instead of clearing it. */
+    private fun stopMonitoring(keepError: Boolean = false) {
         precord.settings.wasArmed = false
         ticker?.cancel()
         settingsJob?.cancel()
@@ -168,7 +171,7 @@ class PrecordService : Service() {
         endCapture()
         projection?.let { p -> projection = null; runCatching { p.stop() } }
         Monitor.update { it.copy(needsCapture = false, cancelling = false) }
-        Monitor.update { it.copy(running = false, bufferedMs = 0, rms = 0f, peak = 0f, scope = FloatArray(SCOPE_POINTS), errorRes = null) }
+        Monitor.update { it.copy(running = false, bufferedMs = 0, rms = 0f, peak = 0f, scope = FloatArray(SCOPE_POINTS), errorRes = if (keepError) it.errorRes else null, errorArg = if (keepError) it.errorArg else null) }
         if (foregrounded) {
             stopForeground(STOP_FOREGROUND_REMOVE)
             foregrounded = false
@@ -236,36 +239,39 @@ class PrecordService : Service() {
         val ref = if (s.micMode == MicMode.PLAYBACK) openPlaybackCapture(s) else null
         refRecord = ref
         Monitor.update { it.copy(needsCapture = s.micMode == MicMode.PLAYBACK && ref == null, cancelling = ref != null) }
+        val refRing = if (ref != null) ReferenceRing(s.sampleRate, s.sampleRate / 25) else null
         capturing = true
         rec.startRecording()
         ref?.startRecording()
+        refThread = if (ref != null && refRing != null) Thread({
+            Process.setThreadPriority(Process.THREAD_PRIORITY_URGENT_AUDIO)
+            val tmp = ShortArray(block)
+            var failures = 0
+            while (capturing) {
+                val r = ref.read(tmp, 0, tmp.size)
+                if (r > 0) { refRing.push(tmp, r); failures = 0 }
+                else if (r < 0 && ++failures > 50) break // capture was revoked; the mic keeps buffering without subtraction
+                else if (r == 0) Thread.sleep(5)
+            }
+        }, "precord-playback").also { it.start() } else null
         captureThread = Thread({
             Process.setThreadPriority(Process.THREAD_PRIORITY_URGENT_AUDIO)
             val buf = ShortArray(block)
             val refBuf = ShortArray(block)
-            var refOk = ref != null
             while (capturing) {
                 val n = rec.read(buf, 0, buf.size)
                 if (n < 0) break
                 if (n == 0) continue
-                if (refOk) {
-                    // Read the same number of playback samples so both streams stay sample-locked.
-                    var got = 0
-                    while (got < n) {
-                        val r = ref!!.read(refBuf, got, n - got)
-                        if (r <= 0) { refOk = false; break }
-                        got += r
-                    }
-                }
-                if (refOk) eng.writeRef(buf, refBuf, n) else eng.write(buf, n)
+                // The Rust canceller needs a reference for every block; the FIFO pads gaps with silence.
+                if (refRing != null) { refRing.pull(refBuf, n); eng.writeRef(buf, refBuf, n) } else eng.write(buf, n)
             }
             if (capturing && engine === eng) {
                 // Read error (mic taken by the system / device switch): re-open the microphone instead of going deaf.
                 scope.launch {
                     delay(1000)
                     if (engine === eng && ++restarts <= 5) {
-                        if (!beginCapture(precord.settings.value)) stopMonitoring()
-                    } else if (engine === eng) stopMonitoring()
+                        if (!beginCapture(precord.settings.value)) stopMonitoring(keepError = true)
+                    } else if (engine === eng) stopMonitoring(keepError = true)
                 }
             }
         }, "precord-capture").also { it.start() }
@@ -317,6 +323,8 @@ class PrecordService : Service() {
         captureThread?.join(1000)
         captureThread = null
         runCatching { refRecord?.stop() }
+        refThread?.join(500)
+        refThread = null
         refRecord?.release()
         refRecord = null
         effects.forEach { runCatching { it.release() } }
@@ -334,7 +342,7 @@ class PrecordService : Service() {
         setScreenOffTriggers(s.shakeToSave)
         if (captureKey != keyOf(s)) {
             // Different buffer length / sample rate needs a fresh ring (the old audio cannot be reinterpreted).
-            if (!beginCapture(s)) stopMonitoring()
+            if (!beginCapture(s)) stopMonitoring(keepError = true)
         }
     }
 
@@ -372,6 +380,7 @@ class PrecordService : Service() {
                     // Background: 1 Hz bookkeeping only (tile subtitle, notification) - saves CPU and battery.
                     Monitor.update { it.copy(running = true, bufferedMs = buffered, windowMs = eng.windowMs, sampleRate = eng.sampleRate) }
                 }
+                if (n % 600 == 0) restarts = 0 // a stable minute earns the retry budget back
                 if (n % (if (visible) 25 else 5) == 0) {
                     updateNotification(buffered, eng.windowMs)
                 }
@@ -398,11 +407,13 @@ class PrecordService : Service() {
                 val exportFailed = settings.autoExport && ClipExporter.exportToRecordings(this@PrecordService, out.file) == null
                 Haptics.thud(this@PrecordService)
                 lastNote = getString(R.string.notif_saved, Fmt.clock(clip.durationMs), clip.file.name)
+                lastNoteAt = android.os.SystemClock.elapsedRealtime()
                 Monitor.emit(SaveEvent.Saved(clip, out.fellBackFrom, exportFailed))
                 updateNotification(eng.bufferedMs(), eng.windowMs)
             } catch (e: Throwable) {
                 Monitor.emit(SaveEvent.Failed(getString(R.string.err_save_hint)))
                 lastNote = getString(R.string.notif_save_failed)
+                lastNoteAt = android.os.SystemClock.elapsedRealtime()
             } finally {
                 Monitor.update { it.copy(saving = false) }
                 saveMutex.unlock()
@@ -436,6 +447,8 @@ class PrecordService : Service() {
         ).build()
 
         val open = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+        // a save/failure note replaces the buffer line for 10 s only
+        if (lastNote != null && android.os.SystemClock.elapsedRealtime() - lastNoteAt > 10_000) lastNote = null
         val line = "${Fmt.clock(bufferedMs)} / ${Fmt.clock(windowMs)}  -  ${Fmt.rate(s.sampleRate)}  ${s.format.label}"
         return NotificationCompat.Builder(this, CHANNEL_MONITOR)
             .setSmallIcon(R.drawable.ic_notif)

@@ -34,7 +34,7 @@ class ClipRepository(context: Context) {
 
     @Synchronized
     fun refresh() {
-        val files = dir.listFiles { f -> f.isFile && ClipFormat.entries.any { it.ext == f.extension.lowercase() } }.orEmpty()
+        val files = dir.listFiles { f -> f.isFile && !f.name.startsWith("trim_tmp") && ClipFormat.entries.any { it.ext == f.extension.lowercase() } }.orEmpty()
         val known = files.map { it.name }.toSet()
         var dirty = false
         index.keys().asSequence().toList().filter { it !in known }.forEach { index.remove(it); dirty = true }
