@@ -1,11 +1,17 @@
 name: android
-on: [push, pull_request]
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with: { distribution: temurin, java-version: 17 }
       - uses: android-actions/setup-android@v3
       - name: Rust toolchain
@@ -20,4 +26,7 @@ jobs:
           export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/27.2.12479018"
           ./gradlew assembleDebug
       - uses: actions/upload-artifact@v4
-        with: { name: precord-debug, path: app/build/outputs/apk/debug/*.apk }
+        with:
+          name: precord-debug-apk
+          path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
