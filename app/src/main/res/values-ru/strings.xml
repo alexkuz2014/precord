@@ -159,4 +159,11 @@
     <string name="chip_hint">Android 16+ показывает время буфера чипом в строке состояния. На более старых версиях виден системный индикатор микрофона и уведомление.</string>
     <string name="opus_rate_note">Opus недоступен при 44,1 кГц.</string>
     <string name="transcribe">Расшифровать</string>
+    <string name="confirm_delete_title">Удалить запись?</string>
+    <string name="confirm_delete_msg">«%1$s» будет удалена без возможности восстановления.</string>
+    <string name="confirm_replace_title">Заменить оригинал?</string>
+    <string name="confirm_replace_msg">Части за пределами выделения будут потеряны. Чтобы сохранить оригинал, выберите «копия».</string>
+    <string name="trim_replace_short">Заменить</string>
+    <string name="confirm_stop_title">Остановить буфер?</string>
+    <string name="confirm_stop_msg">%1$s несохранённого звука в буфере будет удалено.</string>
 </resources>

@@ -28,6 +28,10 @@ object PC {
     val Ink = Color(0xFFF2F2F2)
     val Signal = Color(0xFFFF3B00)
     val SignalDeep = Color(0xFF8F2100)
+    /** Destructive actions and errors only (delete, discard, failures). */
+    val Danger = Color(0xFFFF453A)
+    /** Positive confirmation (saved, installed, enabled). */
+    val Ok = Color(0xFF32D74B)
 }
 
 val Inter = FontFamily(

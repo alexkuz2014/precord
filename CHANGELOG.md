@@ -6,6 +6,7 @@
 * **Status bar instead of an overlay:** the floating bubble and the "display over other apps" permission are gone. Android 16+ shows the buffered time as a status-bar chip (Live Update); older versions keep the system mic indicator + notification.
 * **Deck fits the screen:** flexible layout without scrolling on phones; quick-save keys and the arm switch share one row.
 * **Transcription:** language picker, offline-pack status and download from the app, optional online fallback, "transcribe again".
+* **Visual conventions:** destructive actions (delete, replace original, stop buffer) are red and ask for confirmation with Cancel / Confirm dialogs; errors are red, success is green; orange stays reserved for recording and SAVE.
 * Settings regrouped (Capture / Sound / Saving / Triggers / Transcription / Keep alive). Scope fade, ring write-head marker.
 * Rust: 24 unit tests.
 

@@ -239,9 +239,9 @@ private fun TranscriptionSettings(settings: PrecordSettings, onChange: ((Precord
     Gap(h = 10)
     when {
         progress != null -> Text(stringResource(R.string.stt_pack_progress, progress!!), style = mono(13.sp))
-        pack == PackState.INSTALLED -> Text(stringResource(R.string.stt_pack_installed), style = mono(13.sp))
+        pack == PackState.INSTALLED -> Text(stringResource(R.string.stt_pack_installed), style = mono(13.sp, PC.Ok))
         pack == PackState.DOWNLOADING -> Text(stringResource(R.string.stt_pack_downloading), style = mono(13.sp, PC.Dim))
-        pack == PackState.UNSUPPORTED -> Text(stringResource(R.string.stt_pack_unsupported), style = body(PC.Dim, 13.sp))
+        pack == PackState.UNSUPPORTED -> Text(stringResource(R.string.stt_pack_unsupported), style = body(PC.Danger, 13.sp))
         else -> KeyButton(
             stringResource(if (pack == PackState.DOWNLOADABLE) R.string.stt_pack_download else R.string.stt_pack_unknown),
             Modifier.fillMaxWidth(), filled = pack == PackState.DOWNLOADABLE,

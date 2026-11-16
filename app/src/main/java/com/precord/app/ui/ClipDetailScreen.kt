@@ -79,6 +79,7 @@ fun ClipDetailScreen(clip: Clip, onClose: () -> Unit) {
     var playFrac by remember { mutableFloatStateOf(-1f) }
     var busy by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
+    var confirmReplace by remember { mutableStateOf(false) }
     var transcribing by remember { mutableStateOf<Pair<Int, Int>?>(null) }
     var packProgress by remember { mutableStateOf<Int?>(null) }
 
@@ -181,7 +182,7 @@ fun ClipDetailScreen(clip: Clip, onClose: () -> Unit) {
         val trimmed = start > 0.002f || end < 0.998f
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             KeyButton(stringResource(R.string.trim_new), Modifier.weight(1f), enabled = trimmed && !busy) { trim(false) }
-            KeyButton(stringResource(R.string.trim_replace), Modifier.weight(1f), enabled = trimmed && !busy) { trim(true) }
+            KeyButton(stringResource(R.string.trim_replace), Modifier.weight(1f), enabled = trimmed && !busy, danger = true) { confirmReplace = true }
         }
 
         Gap(h = 24)
@@ -257,11 +258,16 @@ fun ClipDetailScreen(clip: Clip, onClose: () -> Unit) {
                     Toast.makeText(ctx, ctx.getString(if (uri != null) R.string.toast_exported else R.string.toast_export_failed), Toast.LENGTH_SHORT).show()
                 }
             }
-            KeyButton(stringResource(if (confirmDelete) R.string.sure else R.string.delete), Modifier.weight(1f)) {
-                if (!confirmDelete) { confirmDelete = true } else { playing = false; repo.delete(clip.file); onClose() }
-            }
+            KeyButton(stringResource(R.string.delete), Modifier.weight(1f), danger = true) { confirmDelete = true }
         }
-        if (confirmDelete) LaunchedEffect(Unit) { delay(3000); confirmDelete = false }
+        if (confirmDelete) ConfirmDialog(
+            stringResource(R.string.confirm_delete_title), stringResource(R.string.confirm_delete_msg, clip.title),
+            stringResource(R.string.delete), destructive = true, onDismiss = { confirmDelete = false },
+        ) { confirmDelete = false; playing = false; repo.delete(clip.file); onClose() }
+        if (confirmReplace) ConfirmDialog(
+            stringResource(R.string.confirm_replace_title), stringResource(R.string.confirm_replace_msg),
+            stringResource(R.string.trim_replace_short), destructive = true, onDismiss = { confirmReplace = false },
+        ) { confirmReplace = false; trim(true) }
     }
     }
 }

@@ -159,4 +159,11 @@
     <string name="chip_hint">Android 16+ shows the buffered time as a chip in the status bar. Older versions show the system microphone indicator and the notification.</string>
     <string name="opus_rate_note">Opus is unavailable at 44.1 kHz.</string>
     <string name="transcribe">Transcribe</string>
+    <string name="confirm_delete_title">Delete clip?</string>
+    <string name="confirm_delete_msg">«%1$s» will be deleted permanently.</string>
+    <string name="confirm_replace_title">Replace the original?</string>
+    <string name="confirm_replace_msg">The parts outside the selection will be lost. Use «new copy» to keep the original.</string>
+    <string name="trim_replace_short">Replace</string>
+    <string name="confirm_stop_title">Stop the buffer?</string>
+    <string name="confirm_stop_msg">%1$s of unsaved audio in the buffer will be discarded.</string>
 </resources>

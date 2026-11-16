@@ -130,7 +130,7 @@ private fun ColumnScope.Meters(state: MonitorState, settings: PrecordSettings, r
         )
     }
     state.errorRes?.let {
-        Text(stringResource(it, state.errorArg ?: ""), style = body(PC.Ink, 13.sp), modifier = Modifier.padding(top = 8.dp).fillMaxWidth().border(1.dp, PC.Signal).padding(10.dp))
+        Text(stringResource(it, state.errorArg ?: ""), style = body(PC.Ink, 13.sp), modifier = Modifier.padding(top = 8.dp).fillMaxWidth().border(1.dp, PC.Danger).padding(10.dp))
     }
     if (state.needsCapture) {
         Row(Modifier.padding(top = 8.dp).fillMaxWidth().border(1.dp, PC.Dim).padding(start = 10.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -169,6 +169,7 @@ private fun ColumnScope.Controls(
     onCustom: () -> Unit,
 ) {
     val armed = state.running
+    var confirmStop by remember { mutableStateOf(false) }
     Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         PRESETS.forEach { sec -> Pill(Fmt.duration(sec), settings.bufferSec == sec) { onBufferSec(sec) } }
         val custom = settings.bufferSec !in PRESETS
@@ -195,7 +196,16 @@ private fun ColumnScope.Controls(
         listOf(30, 60, 300).filter { it < settings.bufferSec }.forEach { sec ->
             KeyButton(Fmt.duration(sec), enabled = canSave) { onSave(sec * 1000L) }
         }
-        KeyButton(stringResource(if (armed) R.string.stop_buffer else R.string.arm_buffer), Modifier.weight(1f), filled = !armed, onClick = onArmToggle)
+        KeyButton(stringResource(if (armed) R.string.stop_buffer else R.string.arm_buffer), Modifier.weight(1f), filled = !armed, danger = armed) {
+            // stopping throws the buffered audio away - ask once there is something to lose
+            if (armed && state.bufferedMs > 10_000) confirmStop = true else onArmToggle()
+        }
+    }
+    if (confirmStop) {
+        ConfirmDialog(
+            stringResource(R.string.confirm_stop_title), stringResource(R.string.confirm_stop_msg, Fmt.clock(state.bufferedMs)),
+            stringResource(R.string.stop_buffer), destructive = true, onDismiss = { confirmStop = false },
+        ) { confirmStop = false; onArmToggle() }
     }
 }
 

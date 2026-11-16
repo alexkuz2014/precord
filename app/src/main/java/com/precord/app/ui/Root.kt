@@ -52,10 +52,12 @@ fun PrecordRoot(onArm: () -> Unit, onAllowCapture: () -> Unit) {
     var openName by rememberSaveable { mutableStateOf<String?>(null) }
     var showSettings by rememberSaveable { mutableStateOf(false) }
     var banner by remember { mutableStateOf<String?>(null) }
+    var bannerBad by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) { withContext(Dispatchers.IO) { app.clips.refresh() } }
     LaunchedEffect(Unit) {
         Monitor.events.collect { e ->
+            bannerBad = e is SaveEvent.Failed
             banner = when (e) {
                 is SaveEvent.Saved -> buildString {
                     append(ctx.getString(R.string.banner_saved, Fmt.clock(e.clip.durationMs), Fmt.bytes(e.clip.sizeBytes)))
@@ -98,13 +100,13 @@ fun PrecordRoot(onArm: () -> Unit, onAllowCapture: () -> Unit) {
         banner?.let {
             Text(
                 it,
-                style = mono(12.sp, PC.Black),
+                style = mono(12.sp, PC.Black, androidx.compose.ui.text.font.FontWeight.Bold),
                 modifier = Modifier
                     .align(Alignment.TopCenter)
                     .padding(12.dp)
                     .fillMaxWidth()
-                    .background(PC.Ink)
-                    .clickable { banner = null; tab = 1 }
+                    .background(if (bannerBad) PC.Danger else PC.Ok)
+                    .clickable { banner = null; if (!bannerBad) tab = 1 }
                     .padding(12.dp),
             )
         }
