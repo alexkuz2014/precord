@@ -21,6 +21,9 @@ AudioRecord ─PCM16─▶ Rust engine ─▶ gain / noise-gate ─▶ meters + 
 
 17 unit tests: wrap-around, overwrite rejection, a concurrent producer/reader torn-read test, gate, normalisation, WAV round trips, trim.
 
+### Phone-audio removal data flow
+`AudioRecord(playback capture) → precord-playback thread → ReferenceRing (jitter FIFO, zero-pads gaps, drops stale audio) → microphone thread pulls one reference block per mic block → Engine::process_with_ref → Rust AEC`. `denoise.rs` is a 512-point STFT spectral subtractor used by the *Noise reduction* mode.
+
 ### DSP chain (per sample, `Engine::process`)
 `playback subtraction (aec.rs, when a reference is supplied) → 90 Hz high-pass (optional) → presence peaking EQ (voice) → noise gate → user gain → AGC (voice, frozen below −48 dB floor) → soft limiter → ring buffer`. The platform NoiseSuppressor is attached in `PrecordService.attachEffects`; the playback reference comes from a second `AudioRecord` (AudioPlaybackCapture via MediaProjection) read in lock-step with the microphone.
 

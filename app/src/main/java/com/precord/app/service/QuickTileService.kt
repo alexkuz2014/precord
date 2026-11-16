@@ -13,6 +13,7 @@ import com.precord.app.MainActivity
 import com.precord.app.R
 import com.precord.app.core.Fmt
 import com.precord.app.core.Monitor
+import com.precord.app.precord
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -49,8 +50,10 @@ class QuickTileService : TileService() {
             return
         }
         val go = {
+            // Removing phone audio needs Android's capture consent dialog, which only an activity can show.
+            val needsConsent = this.precord.settings.value.micMode == com.precord.app.core.MicMode.PLAYBACK
             val granted = ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
-            if (granted) {
+            if (granted && !needsConsent) {
                 try {
                     ServiceController.start(this)
                 } catch (e: Exception) {
