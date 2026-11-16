@@ -19,11 +19,12 @@ data class MonitorState(
     val peak: Float = 0f,
     val scope: FloatArray = FloatArray(SCOPE_POINTS),
     val saving: Boolean = false,
-    val error: String? = null,
+    val errorRes: Int? = null,
+    val errorArg: String? = null,
 )
 
 sealed interface SaveEvent {
-    data class Saved(val clip: Clip, val note: String?) : SaveEvent
+    data class Saved(val clip: Clip, val fellBackFrom: ClipFormat?, val exportFailed: Boolean) : SaveEvent
     data class Failed(val reason: String) : SaveEvent
 }
 
@@ -31,6 +32,9 @@ sealed interface SaveEvent {
 object Monitor {
     private val _state = MutableStateFlow(MonitorState())
     val state = _state.asStateFlow()
+
+    /** True while the UI is on screen; the service throttles meter updates when false. */
+    val uiVisible = MutableStateFlow(false)
 
     private val _events = MutableSharedFlow<SaveEvent>(extraBufferCapacity = 8)
     val events: SharedFlow<SaveEvent> = _events.asSharedFlow()

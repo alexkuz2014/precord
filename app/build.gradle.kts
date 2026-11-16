@@ -12,9 +12,29 @@ android {
         applicationId = "com.precord.app"
         minSdk = 29
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = (findProperty("precord.versionCode") as String?)?.toInt() ?: 1
+        versionName = (findProperty("precord.versionName") as String?) ?: "1.1.0"
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64") }
+    }
+
+    // "full" = GitHub APK incl. optional Volume-combo accessibility service; "play" = Google Play build without it.
+    flavorDimensions += "dist"
+    productFlavors {
+        create("full") { dimension = "dist"; buildConfigField("boolean", "VOLUME_COMBO", "true") }
+        create("play") { dimension = "dist"; buildConfigField("boolean", "VOLUME_COMBO", "false") }
+    }
+
+    // Upload key: set PRECORD_KEYSTORE_PATH / _PASSWORD / PRECORD_KEY_ALIAS / PRECORD_KEY_PASSWORD (see docs/RELEASING.md).
+    val ksPath = System.getenv("PRECORD_KEYSTORE_PATH")
+    signingConfigs {
+        if (!ksPath.isNullOrBlank() && file(ksPath).exists()) {
+            create("release") {
+                storeFile = file(ksPath)
+                storePassword = System.getenv("PRECORD_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("PRECORD_KEY_ALIAS")
+                keyPassword = System.getenv("PRECORD_KEY_PASSWORD")
+            }
+        }
     }
 
     buildTypes {
@@ -22,7 +42,7 @@ android {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            signingConfig = signingConfigs.getByName("debug") // swap for a real keystore before publishing
+            signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug") // debug key when no keystore is configured
         }
     }
     compileOptions {
@@ -30,7 +50,7 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
     kotlinOptions { jvmTarget = "17" }
-    buildFeatures { compose = true }
+    buildFeatures { compose = true; buildConfig = true }
     sourceSets["main"].jniLibs.srcDir("src/main/jniLibs")
     packaging { jniLibs { useLegacyPackaging = false } }
 }

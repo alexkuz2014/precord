@@ -15,6 +15,10 @@ AudioRecord ──PCM16──▶ Rust engine ──▶ gain / noise-gate ──�
                       normalise ──▶ WAV (Rust)  |  M4A-AAC / Ogg-Opus (MediaCodec, fed PCM by Rust)
 ```
 
+## Documentation
+
+See [docs/](docs/README.md): user guide (en/ru), build, architecture, releasing, **Google Play submission guide**, store listings (en/ru/uk), privacy policy. Languages: English, Русский, Українська.
+
 ## Layout
 
 | Path | What |
@@ -33,11 +37,11 @@ export ANDROID_HOME=$HOME/Android/Sdk
 export ANDROID_NDK_HOME=$ANDROID_HOME/ndk/<installed-version>
 
 cargo test --manifest-path rust-core/Cargo.toml     # engine tests, runs on the host
-./gradlew assembleDebug                              # runs `cargo ndk` first, then Kotlin → app/build/outputs/apk/debug/
-adb install -r app/build/outputs/apk/debug/app-debug.apk
+./gradlew assembleFullDebug                          # runs `cargo ndk` first, then Kotlin → app/build/outputs/apk/full/debug/
+adb install -r app/build/outputs/apk/full/debug/app-full-debug.apk
 ```
 
-Emulator (x86_64): `./gradlew assembleDebug -Pprecord.abis=arm64-v8a,armeabi-v7a,x86_64`
+Emulator (x86_64): `./gradlew assembleFullDebug -Pprecord.abis=arm64-v8a,armeabi-v7a,x86_64`
 (also `rustup target add x86_64-linux-android`).
 
 ## Using it

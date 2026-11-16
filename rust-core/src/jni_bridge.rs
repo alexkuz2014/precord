@@ -100,10 +100,11 @@ pub extern "system" fn Java_com_precord_app_core_NativeBridge_nativeScope(
     out: JFloatArray,
 ) {
     if let Some(e) = engine(handle) {
-        let n = env.get_array_length(&out).unwrap_or(0).max(0) as usize;
-        let mut v = vec![0f32; n];
-        e.scope(&mut v);
-        let _ = env.set_float_array_region(&out, 0, &v);
+        // Fixed stack buffer: no heap allocation on the 25 Hz UI path.
+        let mut v = [0f32; crate::engine::SCOPE_LEN];
+        let n = (env.get_array_length(&out).unwrap_or(0).max(0) as usize).min(v.len());
+        e.scope(&mut v[..n]);
+        let _ = env.set_float_array_region(&out, 0, &v[..n]);
     }
 }
 
@@ -173,14 +174,15 @@ pub extern "system" fn Java_com_precord_app_core_NativeBridge_nativeReadPcm(
     gain_bits: jint,
 ) -> jint {
     let Some(e) = engine(handle) else { return -1 };
-    let n = count.max(0) as usize;
-    let mut v = vec![0i16; n];
-    if !e.read_pcm(start as u64, &mut v, f32::from_bits(gain_bits as u32)) {
+    // Callers use 4096-sample chunks; cap at the stack buffer instead of allocating per call.
+    let mut v = [0i16; 8192];
+    let n = (count.max(0) as usize).min(v.len());
+    if !e.read_pcm(start as u64, &mut v[..n], f32::from_bits(gain_bits as u32)) {
         return -1;
     }
-    match env.set_short_array_region(&dst, 0, &v) {
-        Ok(()) => n as jint,
-        Err(_) => -1,
+    match env.set_short_array_region(&dst, 0, &v[..n]) {
+        Ok(()) if n == count.max(0) as usize => n as jint,
+        _ => -1,
     }
 }
 

@@ -7,6 +7,11 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.res.stringResource
+import com.precord.app.R
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -67,7 +72,7 @@ fun ClipDetailScreen(clip: Clip, onClose: () -> Unit) {
     var start by remember(clip.file.name, clip.sizeBytes) { mutableFloatStateOf(0f) }
     var end by remember(clip.file.name, clip.sizeBytes) { mutableFloatStateOf(1f) }
     var playing by remember { mutableStateOf(false) }
-    var playFrac by remember { mutableFloatStateOf(0f) }
+    var playFrac by remember { mutableFloatStateOf(-1f) }
     var busy by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
 
@@ -92,7 +97,7 @@ fun ClipDetailScreen(clip: Clip, onClose: () -> Unit) {
             val pos = p.currentPosition.toLong()
             playFrac = pos.toFloat() / duration
             if (pos >= endMs() || !p.isPlaying) {
-                p.pause(); p.seekTo(startMs().toInt()); playing = false
+                p.pause(); p.seekTo(startMs().toInt()); playing = false; playFrac = -1f
             }
             delay(25)
         }
@@ -114,18 +119,19 @@ fun ClipDetailScreen(clip: Clip, onClose: () -> Unit) {
             val s = startMs(); val e = endMs()
             val ok = withContext(Dispatchers.IO) { repo.trimClip(clip, s, e, replace) }
             busy = false
-            Toast.makeText(ctx, if (ok) (if (replace) "Clip trimmed" else "Trimmed copy saved") else "Trim failed", Toast.LENGTH_SHORT).show()
+            Toast.makeText(ctx, ctx.getString(if (ok) (if (replace) R.string.toast_trimmed else R.string.toast_trim_copy) else R.string.toast_trim_failed), Toast.LENGTH_SHORT).show()
             if (ok && replace) onClose()
         }
     }
 
-    Column(Modifier.fillMaxSize().background(PC.Black).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp).padding(bottom = 24.dp)) {
+    Box(Modifier.fillMaxSize().background(PC.Black), contentAlignment = Alignment.TopCenter) {
+    Column(Modifier.widthIn(max = 640.dp).fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp).padding(bottom = 24.dp)) {
         Row(Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-            KeyButton("< Back") { commit(); onClose() }
+            KeyButton(stringResource(R.string.back)) { commit(); onClose() }
             Text("${clip.format.label}  ${Fmt.bytes(clip.sizeBytes)}", style = mono(12.sp, PC.Dim), modifier = Modifier.padding(top = 14.dp))
         }
         Gap(h = 20)
-        Label("Title")
+        Label(stringResource(R.string.title))
         BasicTextField(
             title, { title = it },
             textStyle = body(PC.Ink, 20.sp, androidx.compose.ui.text.font.FontWeight.SemiBold),
@@ -135,7 +141,7 @@ fun ClipDetailScreen(clip: Clip, onClose: () -> Unit) {
         )
         Hairline()
         Gap(h = 12)
-        Label("Tags  (comma separated)")
+        Label(stringResource(R.string.tags))
         BasicTextField(
             tags, { tags = it },
             textStyle = mono(14.sp, PC.Ink), cursorBrush = SolidColor(PC.Ink), singleLine = true,
@@ -147,57 +153,66 @@ fun ClipDetailScreen(clip: Clip, onClose: () -> Unit) {
         Text(clip.file.name, style = mono(11.sp, PC.Faint), modifier = Modifier.padding(top = 6.dp))
 
         Gap(h = 24)
-        TrimWaveform(peaks, start, end, if (playing) playFrac else -1f, Modifier.fillMaxWidth().height(140.dp)) { s, e ->
-            start = s; end = e; playing = false
-        }
+        TrimWaveform(
+            peaks, start, end, playFrac, Modifier.fillMaxWidth().height(140.dp),
+            onSeek = { f ->
+                val t = f.coerceIn(start, end)
+                playFrac = t
+                runCatching { player?.seekTo((t * duration).toLong().toInt()) }
+            },
+        ) { s, e -> start = s; end = e; playing = false; playFrac = -1f }
+        Text(stringResource(R.string.seek_hint), style = body(PC.Faint, 12.sp), modifier = Modifier.padding(top = 6.dp))
         Gap(h = 8)
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Column { Label("Start", color = PC.Faint); Text(Fmt.clockTenths(startMs()), style = mono(18.sp)) }
-            Column { Label("Length", color = PC.Faint); Text(Fmt.clockTenths(endMs() - startMs()), style = mono(18.sp)) }
-            Column { Label("End", color = PC.Faint); Text(Fmt.clockTenths(endMs()), style = mono(18.sp)) }
+            Column { Label(stringResource(R.string.start), color = PC.Faint); Text(Fmt.clockTenths(startMs()), style = mono(18.sp)) }
+            Column { Label(stringResource(R.string.length), color = PC.Faint); Text(Fmt.clockTenths(endMs() - startMs()), style = mono(18.sp)) }
+            Column { Label(stringResource(R.string.end), color = PC.Faint); Text(Fmt.clockTenths(endMs()), style = mono(18.sp)) }
         }
 
         Gap(h = 16)
-        KeyButton(if (playing) "Pause" else "Play selection", Modifier.fillMaxWidth(), enabled = player != null, filled = true) { playing = !playing }
+        KeyButton(stringResource(if (playing) R.string.pause else R.string.play_selection), Modifier.fillMaxWidth(), enabled = player != null, filled = true) { playing = !playing }
         Gap(h = 8)
         val trimmed = start > 0.002f || end < 0.998f
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            KeyButton("Trim > new copy", Modifier.weight(1f), enabled = trimmed && !busy) { trim(false) }
-            KeyButton("Trim > replace", Modifier.weight(1f), enabled = trimmed && !busy) { trim(true) }
+            KeyButton(stringResource(R.string.trim_new), Modifier.weight(1f), enabled = trimmed && !busy) { trim(false) }
+            KeyButton(stringResource(R.string.trim_replace), Modifier.weight(1f), enabled = trimmed && !busy) { trim(true) }
         }
 
         Gap(h = 24)
         Hairline()
         Gap(h = 16)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            KeyButton("Share", Modifier.weight(1f)) { ctx.startActivity(ClipExporter.shareIntent(ctx, clip.file)) }
-            KeyButton("Export", Modifier.weight(1f)) {
+            KeyButton(stringResource(R.string.share), Modifier.weight(1f)) { ctx.startActivity(ClipExporter.shareIntent(ctx, clip.file)) }
+            KeyButton(stringResource(R.string.export), Modifier.weight(1f)) {
                 scope.launch {
                     val uri = withContext(Dispatchers.IO) { ClipExporter.exportToRecordings(ctx, clip.file) }
-                    Toast.makeText(ctx, if (uri != null) "Exported to Recordings/Precord" else "Export failed", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(ctx, ctx.getString(if (uri != null) R.string.toast_exported else R.string.toast_export_failed), Toast.LENGTH_SHORT).show()
                 }
             }
-            KeyButton(if (confirmDelete) "Sure?" else "Delete", Modifier.weight(1f)) {
+            KeyButton(stringResource(if (confirmDelete) R.string.sure else R.string.delete), Modifier.weight(1f)) {
                 if (!confirmDelete) { confirmDelete = true } else { playing = false; repo.delete(clip.file); onClose() }
             }
         }
         if (confirmDelete) LaunchedEffect(Unit) { delay(3000); confirmDelete = false }
     }
+    }
 }
 
 /** Waveform with two draggable trim handles. Fractions are 0..1 of the clip. */
 @Composable
-fun TrimWaveform(peaks: FloatArray, start: Float, end: Float, playhead: Float, modifier: Modifier = Modifier, onTrim: (Float, Float) -> Unit) {
+fun TrimWaveform(peaks: FloatArray, start: Float, end: Float, playhead: Float, modifier: Modifier = Modifier, onSeek: (Float) -> Unit, onTrim: (Float, Float) -> Unit) {
     val tick = rememberTick()
     val startNow by rememberUpdatedState(start)
     val endNow by rememberUpdatedState(end)
     val trimNow by rememberUpdatedState(onTrim)
+    val seekNow by rememberUpdatedState(onSeek)
     var widthPx by remember { mutableFloatStateOf(1f) }
     Canvas(
         modifier
             .background(PC.Graphite)
             .border(1.dp, PC.Line)
             .onSizeChanged { widthPx = it.width.toFloat().coerceAtLeast(1f) }
+            .pointerInput(Unit) { detectTapGestures { o -> seekNow((o.x / widthPx).coerceIn(0f, 1f)) } }
             .pointerInput(Unit) {
                 var which = 0 // 1 = start handle, 2 = end handle
                 detectDragGestures(
@@ -237,7 +252,7 @@ fun TrimWaveform(peaks: FloatArray, start: Float, end: Float, playhead: Float, m
         }
         if (playhead in 0f..1f) {
             val x = playhead * size.width
-            drawLine(PC.Dim, Offset(x, 0f), Offset(x, size.height), 1.dp.toPx())
+            drawLine(PC.Ink, Offset(x, 0f), Offset(x, size.height), 1.5.dp.toPx())
         }
     }
 }

@@ -37,6 +37,16 @@ class MainActivity : ComponentActivity() {
         handle(intent)
     }
 
+    override fun onStart() {
+        super.onStart()
+        Monitor.uiVisible.value = true
+    }
+
+    override fun onStop() {
+        Monitor.uiVisible.value = false
+        super.onStop()
+    }
+
     private fun handle(i: Intent?) {
         if (i?.getBooleanExtra(EXTRA_AUTOSTART, false) == true && !Monitor.state.value.running) arm()
     }

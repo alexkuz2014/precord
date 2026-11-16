@@ -25,6 +25,7 @@ class SettingsStore(context: Context) {
             shakeToSave = prefs.getBoolean("shake", d.shakeToSave),
             volumeCombo = prefs.getBoolean("volumeCombo", d.volumeCombo),
             autoExport = prefs.getBoolean("autoExport", d.autoExport),
+            rawMic = prefs.getBoolean("rawMic", d.rawMic),
         ).coerced()
     }
 
@@ -42,6 +43,7 @@ class SettingsStore(context: Context) {
             .putBoolean("shake", s.shakeToSave)
             .putBoolean("volumeCombo", s.volumeCombo)
             .putBoolean("autoExport", s.autoExport)
+            .putBoolean("rawMic", s.rawMic)
             .apply()
         _flow.value = s
     }

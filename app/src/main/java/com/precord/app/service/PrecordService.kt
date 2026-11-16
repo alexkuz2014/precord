@@ -12,6 +12,7 @@ import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.hardware.SensorManager
 import android.media.AudioFormat
+import android.media.AudioManager
 import android.media.AudioRecord
 import android.media.MediaRecorder
 import android.os.IBinder
@@ -56,7 +57,7 @@ class PrecordService : Service() {
     private var record: AudioRecord? = null
     private var captureThread: Thread? = null
     @Volatile private var capturing = false
-    private var captureKey: Pair<Int, Int>? = null // bufferSec to sampleRate currently running
+    private var captureKey: Triple<Int, Int, Boolean>? = null // bufferSec, sampleRate, rawMic currently running
 
     private var ticker: Job? = null
     private var settingsJob: Job? = null
@@ -93,7 +94,7 @@ class PrecordService : Service() {
 
     private fun startMonitoring() {
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-            Monitor.update { it.copy(running = false, error = "Microphone permission missing") }
+            Monitor.update { it.copy(running = false, errorRes = R.string.err_permission, errorArg = null) }
             stopSelf()
             return
         }
@@ -102,15 +103,11 @@ class PrecordService : Service() {
                 startForeground(NOTIF_ID, buildNotification(0, 1, precord.settings.value), ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
                 foregrounded = true
             } catch (e: Exception) { // e.g. ForegroundServiceStartNotAllowedException when started from the background
-                Monitor.update { it.copy(running = false, error = "Open Precord once to arm the buffer") }
+                Monitor.update { it.copy(running = false, errorRes = R.string.err_background, errorArg = null) }
                 stopSelf()
                 return
             }
         }
-        val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
-        if (wakeLock == null) wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "precord:capture").apply { setReferenceCounted(false) }
-        wakeLock?.acquire()
-
         if (!beginCapture(precord.settings.value)) {
             stopMonitoring()
             return
@@ -126,10 +123,9 @@ class PrecordService : Service() {
     private fun stopMonitoring() {
         ticker?.cancel()
         settingsJob?.cancel()
-        shake?.stop()
+        setScreenOffTriggers(false)
         endCapture()
-        wakeLock?.let { if (it.isHeld) it.release() }
-        Monitor.update { it.copy(running = false, bufferedMs = 0, rms = 0f, peak = 0f, scope = FloatArray(SCOPE_POINTS)) }
+        Monitor.update { it.copy(running = false, bufferedMs = 0, rms = 0f, peak = 0f, scope = FloatArray(SCOPE_POINTS), errorRes = null) }
         if (foregrounded) {
             stopForeground(STOP_FOREGROUND_REMOVE)
             foregrounded = false
@@ -155,14 +151,14 @@ class PrecordService : Service() {
         endCapture()
         val eng = ReplayEngine.create(s.sampleRate, s.windowMs)
         if (eng == null) {
-            Monitor.update { it.copy(running = false, error = "Not enough memory for ${Fmt.bytes(s.ramBytes)} buffer") }
+            Monitor.update { it.copy(running = false, errorRes = R.string.err_memory, errorArg = Fmt.bytes(s.ramBytes)) }
             return false
         }
         val minBuf = AudioRecord.getMinBufferSize(s.sampleRate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
         val block = s.sampleRate / 25 // 40 ms reads
         val rec = try {
             AudioRecord.Builder()
-                .setAudioSource(MediaRecorder.AudioSource.MIC)
+                .setAudioSource(audioSource(s))
                 .setAudioFormat(
                     AudioFormat.Builder()
                         .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
@@ -174,19 +170,19 @@ class PrecordService : Service() {
                 .build()
         } catch (e: Exception) {
             eng.close()
-            Monitor.update { it.copy(running = false, error = "Microphone unavailable") }
+            Monitor.update { it.copy(running = false, errorRes = R.string.err_mic_unavailable, errorArg = null) }
             return false
         }
         if (rec.state != AudioRecord.STATE_INITIALIZED) {
             rec.release()
             eng.close()
-            Monitor.update { it.copy(running = false, error = "Microphone is in use by another app") }
+            Monitor.update { it.copy(running = false, errorRes = R.string.err_mic_busy, errorArg = null) }
             return false
         }
         eng.setDsp(s.gainDb.toFloat(), s.gateEnabled, s.gateDb.toFloat())
         engine = eng
         record = rec
-        captureKey = s.bufferSec to s.sampleRate
+        captureKey = Triple(s.bufferSec, s.sampleRate, s.rawMic)
         capturing = true
         rec.startRecording()
         captureThread = Thread({
@@ -197,8 +193,17 @@ class PrecordService : Service() {
                 if (n > 0) eng.write(buf, n) else if (n < 0) break
             }
         }, "precord-capture").also { it.start() }
-        Monitor.update { it.copy(running = true, error = null, windowMs = s.windowMs, sampleRate = s.sampleRate, bufferedMs = 0) }
+        Monitor.update { it.copy(running = true, errorRes = null, errorArg = null, windowMs = s.windowMs, sampleRate = s.sampleRate, bufferedMs = 0) }
         return true
+    }
+
+    /** UNPROCESSED bypasses AGC / noise suppression where the device supports it. */
+    private fun audioSource(s: PrecordSettings): Int {
+        if (s.rawMic) {
+            val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+            if (am.getProperty(AudioManager.PROPERTY_SUPPORT_AUDIO_SOURCE_UNPROCESSED) == "true") return MediaRecorder.AudioSource.UNPROCESSED
+        }
+        return MediaRecorder.AudioSource.MIC
     }
 
     private fun endCapture() = synchronized(captureLock) {
@@ -216,10 +221,25 @@ class PrecordService : Service() {
     private fun applySettings(s: PrecordSettings) {
         val eng = engine ?: return
         eng.setDsp(s.gainDb.toFloat(), s.gateEnabled, s.gateDb.toFloat())
-        if (s.shakeToSave) shake?.start() else shake?.stop()
-        if (captureKey != (s.bufferSec to s.sampleRate)) {
+        setScreenOffTriggers(s.shakeToSave)
+        if (captureKey != Triple(s.bufferSec, s.sampleRate, s.rawMic)) {
             // Different buffer length / sample rate needs a fresh ring (the old audio cannot be reinterpreted).
             if (!beginCapture(s)) stopMonitoring()
+        }
+    }
+
+    /** The partial wake lock (battery cost) is only held while shake-to-save needs the sensor with the screen off. */
+    private fun setScreenOffTriggers(shakeOn: Boolean) {
+        if (shakeOn) {
+            if (wakeLock == null) {
+                val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+                wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "precord:shake").apply { setReferenceCounted(false) }
+            }
+            if (wakeLock?.isHeld != true) wakeLock?.acquire()
+            shake?.start()
+        } else {
+            shake?.stop()
+            wakeLock?.let { if (it.isHeld) it.release() }
         }
     }
 
@@ -230,15 +250,22 @@ class PrecordService : Service() {
         val scopeBuf = FloatArray(SCOPE_POINTS)
         while (scope.isActive) {
             val eng = engine
+            val visible = Monitor.uiVisible.value
             if (eng != null) {
-                val (rms, peak) = eng.levels()
-                eng.scope(scopeBuf)
                 val buffered = eng.bufferedMs()
-                Monitor.update { it.copy(running = true, bufferedMs = buffered, windowMs = eng.windowMs, sampleRate = eng.sampleRate, rms = rms, peak = peak, scope = scopeBuf.copyOf()) }
-                if (n % 30 == 0) updateNotification(buffered, eng.windowMs)
+                if (visible) {
+                    // UI on screen: 25 Hz meters + scope.
+                    val (rms, peak) = eng.levels()
+                    eng.scope(scopeBuf)
+                    Monitor.update { it.copy(running = true, bufferedMs = buffered, windowMs = eng.windowMs, sampleRate = eng.sampleRate, rms = rms, peak = peak, scope = scopeBuf.copyOf()) }
+                } else if (n % 5 == 0) {
+                    // Background: 1 Hz bookkeeping only (tile subtitle, notification) - saves CPU and battery.
+                    Monitor.update { it.copy(running = true, bufferedMs = buffered, windowMs = eng.windowMs, sampleRate = eng.sampleRate) }
+                }
+                if (n % (if (visible) 25 else 5) == 0) updateNotification(buffered, eng.windowMs)
             }
             n++
-            delay(33)
+            delay(if (visible) 40L else 200L)
         }
     }
 
@@ -256,17 +283,14 @@ class PrecordService : Service() {
                 val target = precord.clips.newFile(settings.format)
                 val out = ClipEncoder.encode(eng, settings, target, ask)
                 val clip = precord.clips.register(out.file, out.durationMs, eng.sampleRate)
-                var note = out.note
-                if (settings.autoExport && ClipExporter.exportToRecordings(this@PrecordService, out.file) == null) {
-                    note = (note?.plus("; ") ?: "") + "export to Recordings failed"
-                }
+                val exportFailed = settings.autoExport && ClipExporter.exportToRecordings(this@PrecordService, out.file) == null
                 Haptics.thud(this@PrecordService)
-                lastNote = "Saved ${Fmt.clock(clip.durationMs)} - ${clip.file.name}"
-                Monitor.emit(SaveEvent.Saved(clip, note))
+                lastNote = getString(R.string.notif_saved, Fmt.clock(clip.durationMs), clip.file.name)
+                Monitor.emit(SaveEvent.Saved(clip, out.fellBackFrom, exportFailed))
                 updateNotification(eng.bufferedMs(), eng.windowMs)
             } catch (e: Throwable) {
-                Monitor.emit(SaveEvent.Failed(e.message ?: "Save failed"))
-                lastNote = "Save failed"
+                Monitor.emit(SaveEvent.Failed(getString(R.string.err_save_hint)))
+                lastNote = getString(R.string.notif_save_failed)
             } finally {
                 Monitor.update { it.copy(saving = false) }
                 saveMutex.unlock()
@@ -303,7 +327,7 @@ class PrecordService : Service() {
         val line = "${Fmt.clock(bufferedMs)} / ${Fmt.clock(windowMs)}  -  ${Fmt.rate(s.sampleRate)}  ${s.format.label}"
         return NotificationCompat.Builder(this, CHANNEL_MONITOR)
             .setSmallIcon(R.drawable.ic_notif)
-            .setContentTitle("PRECORD  -  ARMED")
+            .setContentTitle(getString(R.string.notif_title))
             .setContentText(lastNote ?: line)
             .setSubText(if (lastNote != null) line else null)
             .setProgress(windowMs.coerceAtMost(Int.MAX_VALUE.toLong()).toInt().coerceAtLeast(1), bufferedMs.coerceAtMost(windowMs).toInt(), false)
@@ -315,8 +339,8 @@ class PrecordService : Service() {
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setContentIntent(open)
-            .addAction(action(1, "SAVE REPLAY", ServiceController.ACTION_SAVE))
-            .addAction(action(2, "STOP", ServiceController.ACTION_STOP))
+            .addAction(action(1, getString(R.string.action_save), ServiceController.ACTION_SAVE))
+            .addAction(action(2, getString(R.string.action_stop), ServiceController.ACTION_STOP))
             .build()
     }
 

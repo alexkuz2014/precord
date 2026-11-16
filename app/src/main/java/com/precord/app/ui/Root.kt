@@ -26,6 +26,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import com.precord.app.R
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.precord.app.core.Fmt
@@ -54,8 +57,12 @@ fun PrecordRoot(onArm: () -> Unit) {
     LaunchedEffect(Unit) {
         Monitor.events.collect { e ->
             banner = when (e) {
-                is SaveEvent.Saved -> "SAVED  ${Fmt.clock(e.clip.durationMs)}  ${Fmt.bytes(e.clip.sizeBytes)}" + (e.note?.let { "\n$it" } ?: "")
-                is SaveEvent.Failed -> "SAVE FAILED - ${e.reason}"
+                is SaveEvent.Saved -> buildString {
+                    append(ctx.getString(R.string.banner_saved, Fmt.clock(e.clip.durationMs), Fmt.bytes(e.clip.sizeBytes)))
+                    e.fellBackFrom?.let { append("\n").append(ctx.getString(R.string.banner_fallback, it.label)) }
+                    if (e.exportFailed) append("\n").append(ctx.getString(R.string.banner_export_failed))
+                }
+                is SaveEvent.Failed -> ctx.getString(R.string.banner_failed, e.reason)
             }
         }
     }
@@ -110,12 +117,12 @@ fun PrecordRoot(onArm: () -> Unit) {
 @Composable
 private fun TopBar(armed: Boolean, onSettings: () -> Unit) {
     Row(Modifier.fillMaxWidth().height(52.dp).padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text("PRECORD", style = androidx.compose.ui.text.TextStyle(fontFamily = Inter, fontSize = 15.sp, color = PC.Ink, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold, letterSpacing = 3.sp))
+        Text(stringResource(R.string.app_title), style = androidx.compose.ui.text.TextStyle(fontFamily = Inter, fontSize = 15.sp, color = PC.Ink, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold, letterSpacing = 3.sp))
         Gap(10)
-        if (armed) Text("REC", style = mono(11.sp, PC.Signal, androidx.compose.ui.text.font.FontWeight.Bold))
+        if (armed) Text(stringResource(R.string.rec), style = mono(11.sp, PC.Signal, androidx.compose.ui.text.font.FontWeight.Bold))
         androidx.compose.foundation.layout.Spacer(Modifier.weight(1f))
-        Box(Modifier.border(1.dp, PC.Line).clickable(onClick = onSettings).padding(horizontal = 12.dp, vertical = 8.dp)) {
-            Text("SET", style = label(PC.Ink, 11.sp))
+        Box(Modifier.border(1.dp, PC.Line).clickable(role = Role.Button, onClick = onSettings).padding(horizontal = 14.dp, vertical = 12.dp)) {
+            Text(stringResource(R.string.settings_btn), style = label(PC.Ink, 11.sp))
         }
     }
 }
@@ -123,8 +130,8 @@ private fun TopBar(armed: Boolean, onSettings: () -> Unit) {
 @Composable
 private fun BottomNav(tab: Int, clipCount: Int, onTab: (Int) -> Unit) {
     val tick = rememberTick()
-    Row(Modifier.fillMaxWidth().height(52.dp)) {
-        listOf("DECK", "LIBRARY  $clipCount").forEachIndexed { i, t ->
+    Row(Modifier.fillMaxWidth().height(56.dp)) {
+        listOf(stringResource(R.string.tab_deck), stringResource(R.string.tab_library, clipCount)).forEachIndexed { i, t ->
             Box(
                 Modifier.weight(1f).fillMaxSize().clickable { if (tab != i) { tick(); onTab(i) } },
                 contentAlignment = Alignment.Center,
