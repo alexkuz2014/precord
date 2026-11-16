@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with: { distribution: temurin, java-version: 17 }
       - uses: android-actions/setup-android@v3
       - name: Rust + cargo-ndk
@@ -19,15 +19,26 @@ jobs:
           cargo install cargo-ndk --locked
       - name: Test engine
         run: cargo test --manifest-path rust-core/Cargo.toml
-      - name: Build release APK (signed with the debug key; replace with your keystore for store distribution)
+      - name: Pick release tag
+        id: tag
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then TAG="$GITHUB_REF_NAME"; else TAG="v1.0.${GITHUB_RUN_NUMBER}"; fi
+          echo "name=$TAG" >> "$GITHUB_OUTPUT"
+      - name: Build release APK (debug-key signed, installable directly)
         run: |
           sdkmanager "ndk;27.2.12479018"
           export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/27.2.12479018"
           ./gradlew assembleRelease
-          cp app/build/outputs/apk/release/*.apk precord-${GITHUB_REF_NAME:-dev}.apk
+          cp app/build/outputs/apk/release/*.apk "precord-${{ steps.tag.outputs.name }}.apk"
       - uses: actions/upload-artifact@v4
-        with: { name: precord-apk, path: precord-*.apk }
-      - name: Publish GitHub release
-        if: startsWith(github.ref, 'refs/tags/v')
+        with:
+          name: precord-release-apk
+          path: precord-*.apk
+          if-no-files-found: error
+      - name: Publish GitHub release (creates the tag if missing)
         uses: softprops/action-gh-release@v2
-        with: { files: "precord-*.apk", generate_release_notes: true }
+        with:
+          tag_name: ${{ steps.tag.outputs.name }}
+          target_commitish: ${{ github.sha }}
+          files: precord-*.apk
+          generate_release_notes: true
