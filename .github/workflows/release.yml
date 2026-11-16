@@ -7,12 +7,11 @@ permissions:
   contents: write
 jobs:
   apk:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: actions/setup-java@v5
         with: { distribution: temurin, java-version: 17 }
-      - uses: android-actions/setup-android@v3
       - name: Rust + cargo-ndk
         run: |
           rustup target add aarch64-linux-android armv7-linux-androideabi
@@ -26,8 +25,8 @@ jobs:
           echo "name=$TAG" >> "$GITHUB_OUTPUT"
       - name: Build release APK (debug-key signed, installable directly)
         run: |
-          sdkmanager "ndk;27.2.12479018"
-          export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/27.2.12479018"
+          echo "SDK=$ANDROID_HOME NDK=$ANDROID_NDK_HOME"
+          test -d "$ANDROID_NDK_HOME" || { echo "no preinstalled NDK"; exit 1; }
           ./gradlew assembleRelease
           cp app/build/outputs/apk/release/*.apk "precord-${{ steps.tag.outputs.name }}.apk"
       - uses: actions/upload-artifact@v4
